@@ -124,6 +124,17 @@ export default function App() {
     if (!error) { setAthletes(athletes.map(a => a.id === id ? { ...a, first_name: updates.firstName, last_name: updates.lastName, email: updates.email, phone: updates.phone, birthday: updates.birthday, age, gender: updates.gender, status: updates.status } : a)); showNotification('Athlete updated!'); }
   };
 
+  const deleteAthlete = async (id, athleteName) => {
+    if (!window.confirm(`Delete ${athleteName} and ALL their test results? This cannot be undone.`)) return;
+    const { error: resultsError } = await supabase.from('results').delete().eq('athlete_id', id);
+    if (resultsError) { showNotification('Error deleting results', 'error'); return; }
+    const { error } = await supabase.from('athletes').delete().eq('id', id);
+    if (error) { showNotification('Error deleting athlete', 'error'); return; }
+    setAthletes(athletes.filter(a => a.id !== id));
+    setResults(results.filter(r => r.athlete_id !== id));
+    showNotification(`${athleteName} deleted`);
+  };
+
   const deleteResult = async (resultId) => {
     const { error } = await supabase.from('results').delete().eq('id', resultId);
     if (!error) { setResults(results.filter(r => r.id !== resultId)); showNotification('Result deleted'); }
@@ -169,7 +180,8 @@ export default function App() {
     { id: 'records', label: 'Records' },
     { id: 'recentprs', label: '🔥 Recent PRs' },
     { id: 'manage', label: '⚙️ Manage' },
-    { id: 'jumpcalc', label: '📏 Jump Calc' }
+    { id: 'jumpcalc', label: '📏 Jump Calc' },
+    { id: 'recordboard', label: '🏆 Record Board' }
   ];
 
   return (
@@ -194,12 +206,13 @@ export default function App() {
       {notification && <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getAthleteById={getAthleteById} />}
-        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} results={results} />}
+        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} />}
         {page === 'dashboard' && <DashboardPage athletes={athletes} results={results} getPR={getPR} />}
         {page === 'records' && <RecordsPage athletes={athletes} results={results} getAthleteById={getAthleteById} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getAthleteById={getAthleteById} />}
         {page === 'manage' && <ManagePage athletes={athletes} results={results} getAthleteById={getAthleteById} deleteResult={deleteResult} updateResult={updateResult} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
+        {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; }`}</style>
     </div>
@@ -267,7 +280,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
       const t = getTestById(r.test_id);
       return { athlete: (a ? a.first_name + ' ' + a.last_name : 'Unknown'), test: t ? t.name : r.test_id, value: r.converted_value, unit: t ? (t.displayUnit || t.unit) : '', isPR: r.is_pr };
     }));
-    // Clear values but keep athletes
     setAthleteRows(athleteRows.map(row => {
       const values = {};
       selectedTests.forEach(tid => { values[tid] = ''; });
@@ -283,7 +295,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
       <p style={{ color: '#888', marginBottom: 32 }}>Select your tests, add athletes, enter results</p>
 
-      {/* Session Setup */}
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
         <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Session Setup</h3>
         <div style={{ marginBottom: 16 }}>
@@ -313,7 +324,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
         )}
       </div>
 
-      {/* Athletes & Values */}
       {selectedTests.length > 0 && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
           <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Add Athletes & Enter Results</h3>
@@ -380,7 +390,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 }
 
 /* ===================== ATHLETES PAGE ===================== */
-function AthletesPage({ athletes, addAthlete, updateAthlete, results }) {
+function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -437,7 +447,6 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, results }) {
         <button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} style={{ padding: '14px 28px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add Athlete</button>
       </div>
 
-      {/* Search Bar */}
       <div style={{ marginBottom: 24 }}>
         <input type="text" placeholder="Search athletes by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: '100%', maxWidth: 400, ...iStyle }} />
         {searchTerm && <span style={{ marginLeft: 12, color: '#888', fontSize: 14 }}>{filteredAthletes.length} result{filteredAthletes.length !== 1 ? 's' : ''}</span>}
@@ -480,6 +489,7 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, results }) {
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button onClick={() => handleEdit(athlete)} style={{ padding: '4px 10px', background: 'rgba(0,212,255,0.2)', border: 'none', borderRadius: 4, color: '#00d4ff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Edit</button>
+                  <button onClick={() => deleteAthlete(athlete.id, `${athlete.first_name} ${athlete.last_name}`)} style={{ padding: '4px 10px', background: 'rgba(255,100,100,0.15)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Delete</button>
                   <span style={{ padding: '4px 10px', background: athlete.status === 'Active' ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.1)', color: athlete.status === 'Active' ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{athlete.status}</span>
                 </div>
               </div>
@@ -901,6 +911,185 @@ function JumpCalcPage({ athletes, setAthletes, results, logResults, getPR, showN
       )}
       {savedCount > 0 && readyCount === 0 && <div style={{ textAlign: 'center', padding: 24, color: '#00ff88', fontWeight: 600 }}>✓ All {savedCount} results saved!</div>}
       {rows.length === 0 && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Add athletes above to start calculating jumps.</p></div>}
+    </div>
+  );
+}
+
+/* ===================== RECORD BOARD PAGE ===================== */
+function RecordBoardPage({ athletes, results }) {
+  const [gender, setGender] = useState('boys');
+  const [autoSwitch, setAutoSwitch] = useState(false);
+  const [tvMode, setTvMode] = useState(false);
+
+  const BOARD_SPEED = [
+    { id: 'max_velocity', name: 'Max Velocity', unit: 'MPH', direction: 'higher', format: v => v.toFixed(1) },
+    { id: '5_10_fly', name: '5-10 Fly', unit: 'sec', direction: 'lower', format: v => v.toFixed(2) },
+    { id: '5_0_5', name: '5-0-5', unit: 'sec', direction: 'lower', format: v => v.toFixed(2) },
+    { id: 'broad_jump', name: 'Broad Jump', unit: 'in', direction: 'higher', format: v => `${Math.floor(v/12)}'${Math.round(v%12)}"` },
+    { id: 'vertical_jump', name: 'Vertical', unit: 'in', direction: 'higher', format: v => v.toFixed(1) },
+    { id: 'approach_jump', name: 'Approach', unit: 'in', direction: 'higher', format: v => v.toFixed(1) },
+    { id: 'rsi', name: 'RSI', unit: '', direction: 'higher', format: v => v.toFixed(2) },
+  ];
+
+  const BOARD_STRENGTH = [
+    { id: 'clean', name: 'Clean', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'snatch', name: 'Snatch', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'bench_press', name: 'Bench', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'overhead', name: 'Overhead', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher', format: v => Math.round(v) },
+  ];
+
+  const EXCLUDED = ['matt secrest'];
+
+  const getAgeAtTest = (birthday, testDate) => {
+    if (!birthday || !testDate) return null;
+    const b = new Date(String(birthday).slice(0,10)+'T00:00:00');
+    const t = new Date(testDate);
+    let age = t.getFullYear() - b.getFullYear();
+    if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) age--;
+    return age;
+  };
+
+  const buildRecords = (tests) => {
+    const athleteMap = {};
+    athletes.forEach(a => { athleteMap[a.id] = a; });
+    const records = {};
+
+    tests.forEach(test => {
+      records[test.id] = { hs: [], ms: [] };
+
+      results.forEach(r => {
+        if (r.test_id !== test.id) return;
+        const a = athleteMap[r.athlete_id];
+        if (!a) return;
+        const fullName = `${a.first_name} ${a.last_name}`.toLowerCase();
+        if (EXCLUDED.includes(fullName)) return;
+        const g = (a.gender || '').toLowerCase();
+        const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
+        if (!isMatch) return;
+
+        const val = parseFloat(r.converted_value || r.raw_value);
+        if (isNaN(val)) return;
+        const age = getAgeAtTest(a.birthday, r.test_date);
+        const isMSAge = age !== null && age < 15;
+        const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val };
+
+        // Everyone goes on HS (15+) board, only 14 & under also on MS board
+        records[test.id]['hs'].push(entry);
+        if (isMSAge) records[test.id]['ms'].push(entry);
+      });
+
+      ['hs', 'ms'].forEach(cat => {
+        records[test.id][cat].sort((a, b) => test.direction === 'lower' ? a.value - b.value : b.value - a.value);
+        const seen = new Set();
+        records[test.id][cat] = records[test.id][cat].filter(r => {
+          if (seen.has(r.name)) return false;
+          seen.add(r.name);
+          return true;
+        }).slice(0, 5);
+      });
+    });
+    return records;
+  };
+
+  const speedRecords = buildRecords(BOARD_SPEED);
+  const strengthRecords = buildRecords(BOARD_STRENGTH);
+
+  useEffect(() => {
+    if (!autoSwitch) return;
+    const interval = setInterval(() => setGender(g => g === 'boys' ? 'girls' : 'boys'), 60000);
+    return () => clearInterval(interval);
+  }, [autoSwitch]);
+
+  const renderTestCard = (test, records, isTv) => {
+    const hs = records[test.id]?.hs || [];
+    const ms = records[test.id]?.ms || [];
+    const cardBg = isTv ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.03)';
+    const cardBorder = isTv ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.1)';
+
+    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (
+      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: 'linear-gradient(90deg, rgba(200,150,62,0.3) 0%, rgba(200,150,62,0.05) 100%)', borderLeft: '3px solid #C8963E' } : {}) }}>
+        <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: i === 0 ? '#C8963E' : '#e8e8e8' }}>{test.format(r.value)}</span>
+        <span style={{ color: '#888', fontSize: isTv ? 12 : 13, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+      </div>
+    )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 4 }}>—</div>;
+
+    return (
+      <div key={test.id} style={{ background: cardBg, borderRadius: 10, padding: isTv ? 10 : 12, border: cardBorder }}>
+        <div style={{ textAlign: 'center', fontSize: isTv ? 15 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: '2px solid #C8963E', letterSpacing: 1 }}>{test.name}</div>
+        <div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>15+</div>
+        {renderRows(hs)}
+        <div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>14 & UNDER</div>
+        {renderRows(ms)}
+      </div>
+    );
+  };
+
+  // TV MODE
+  if (tvMode) {
+    return (
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 20, overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '4px solid #C8963E' }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
+          <div style={{ fontSize: 48, fontWeight: 700, letterSpacing: 4 }}>{gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS</div>
+          <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
+            {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
+            {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // NORMAL IN-APP VIEW
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>🏆 Record Board</h1>
+          <p style={{ color: '#888' }}>Top 5 records across all athletes — put this on your gym TV!</p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={() => setGender(g => g === 'boys' ? 'girls' : 'boys')} style={{ padding: '10px 20px', background: 'rgba(0,212,255,0.15)', border: '2px solid #00d4ff', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit' }}>
+            {gender === 'boys' ? 'SWITCH TO GIRLS' : 'SWITCH TO BOYS'}
+          </button>
+          <button onClick={() => setAutoSwitch(a => !a)} style={{ padding: '10px 20px', background: autoSwitch ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)', border: `2px solid ${autoSwitch ? '#00ff88' : '#666'}`, borderRadius: 6, color: autoSwitch ? '#00ff88' : '#888', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit' }}>
+            {autoSwitch ? '⏸ PAUSE' : '▶ AUTO (60s)'}
+          </button>
+          <button onClick={() => { setAutoSwitch(true); setTvMode(true); }} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #C8963E 0%, #A87A2E 100%)', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14, fontFamily: 'inherit', letterSpacing: 1 }}>
+            📺 TV MODE
+          </button>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 36, fontWeight: 700, textAlign: 'center', marginBottom: 24, letterSpacing: 4 }}>
+        {gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Speed & Power</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, false))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Strength</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, false))}
+        </div>
+      </div>
     </div>
   );
 }
