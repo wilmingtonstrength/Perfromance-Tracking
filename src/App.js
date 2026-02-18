@@ -955,8 +955,8 @@ function RecordBoardPage({ athletes, results }) {
     { id: '5_10_fly', name: '5-10 Fly', unit: 'sec', direction: 'lower', format: v => v.toFixed(2) },
     { id: '5_0_5', name: '5-0-5', unit: 'sec', direction: 'lower', format: v => v.toFixed(2) },
     { id: 'broad_jump', name: 'Broad Jump', unit: '', direction: 'higher', format: v => formatFeetInches(v) },
-    { id: 'vertical_jump', name: 'Vertical', unit: '', direction: 'higher', format: v => formatFeetInches(v) },
-    { id: 'approach_jump', name: 'Approach', unit: '', direction: 'higher', format: v => formatFeetInches(v) },
+    { id: 'vertical_jump', name: 'Vertical', unit: 'in', direction: 'higher', format: v => Math.round(v * 10) / 10 },
+    { id: 'approach_jump', name: 'Approach', unit: 'in', direction: 'higher', format: v => Math.round(v * 10) / 10 },
     { id: 'rsi', name: 'RSI', unit: '', direction: 'higher', format: v => v.toFixed(2) },
   ];
 
