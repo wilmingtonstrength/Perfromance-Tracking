@@ -55,7 +55,10 @@ const TESTS = {
     { id: 'back_squat', name: 'Back Squat', unit: 'lbs', direction: 'higher', allowKg: true },
     { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', allowKg: true },
     { id: 'bench_press', name: 'Bench Press', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'overhead', name: 'Overhead', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'press', name: 'Press', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'push_press', name: 'Push Press', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'jerk', name: 'Jerk', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'overhead', name: 'Overhead (legacy)', unit: 'lbs', direction: 'higher', allowKg: true },
     { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', allowKg: true },
     { id: 'clean', name: 'Clean', unit: 'lbs', direction: 'higher', allowKg: true },
     { id: 'snatch', name: 'Snatch', unit: 'lbs', direction: 'higher', allowKg: true },
@@ -77,6 +80,19 @@ const ADULT_TESTS = {
   body_comp: { label: 'Body Composition', tests: [
     { id: 'body_weight', name: 'Body Weight', unit: 'lbs', direction: 'lower' },
     { id: 'body_fat_pct', name: 'Body Fat %', unit: '%', direction: 'lower' },
+    { id: 'lean_muscle_mass', name: 'Skeletal Muscle Mass', unit: 'lbs', direction: 'higher' },
+  ]},
+  strength: { label: 'Strength', tests: [
+    { id: 'back_squat', name: 'Back Squat', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'bench_press', name: 'Bench Press', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'press', name: 'Press', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'push_press', name: 'Push Press', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'jerk', name: 'Jerk', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'clean', name: 'Clean', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'snatch', name: 'Snatch', unit: 'lbs', direction: 'higher', allowKg: true },
+    { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher' },
   ]}
 };
 
@@ -114,7 +130,7 @@ function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], place
   const ref = React.useRef(null);
   const selectedAthlete = athletes.find(a => a.id === value);
   const filtered = athletes
-    .filter(a => a.status === 'Active' && !excludeIds.includes(a.id))
+    .filter(a => (a.status === 'Active' || a.status === 'active') && !excludeIds.includes(a.id))
     .filter(a => !filterType || (a.type || 'athlete') === filterType)
     .filter(a => !search || `${a.first_name} ${a.last_name}`.toLowerCase().includes(search.toLowerCase()));
 
@@ -421,7 +437,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
   const [submittedResults, setSubmittedResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [entryMode, setEntryMode] = useState('athlete'); // 'athlete' or 'adult'
+  const [entryMode, setEntryMode] = useState('athlete');
 
   const testSet = entryMode === 'adult' ? ADULT_TESTS : TESTS;
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.allowKg; });
@@ -436,11 +452,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
     }
   };
 
-  const switchMode = (mode) => {
-    setEntryMode(mode);
-    setSelectedTests([]);
-    setAthleteRows([]);
-  };
+  const switchMode = (mode) => { setEntryMode(mode); setSelectedTests([]); setAthleteRows([]); };
 
   const addAthleteRow = (athleteId) => {
     if (!athleteId || athleteRows.find(r => r.athleteId === athleteId)) return;
@@ -459,11 +471,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 
   const usedAthleteIds = athleteRows.map(r => r.athleteId);
 
-  const startNextGroup = () => {
-    setAthleteRows([]);
-    setSubmittedResults([]);
-    setShowSummary(false);
-  };
+  const startNextGroup = () => { setAthleteRows([]); setSubmittedResults([]); setShowSummary(false); };
 
   const handleSubmit = async () => {
     if (selectedTests.length === 0 || !testDate) { alert('Please select at least one test and a date'); return; }
@@ -540,15 +548,9 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
     <div>
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
       <p style={{ color: '#888', marginBottom: 24 }}>Select your tests, add athletes, enter results</p>
-
-      {/* Mode Toggle */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        <button onClick={() => switchMode('athlete')} style={{ padding: '10px 24px', background: entryMode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'athlete' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>
-          Youth Athletes
-        </button>
-        <button onClick={() => switchMode('adult')} style={{ padding: '10px 24px', background: entryMode === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'adult' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'adult' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>
-          Adult Clients
-        </button>
+        <button onClick={() => switchMode('athlete')} style={{ padding: '10px 24px', background: entryMode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'athlete' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Youth Athletes</button>
+        <button onClick={() => switchMode('adult')} style={{ padding: '10px 24px', background: entryMode === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'adult' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'adult' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Adult Clients</button>
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${entryMode === 'adult' ? 'rgba(255,165,0,0.2)' : 'rgba(255,255,255,0.1)'}` }}>
@@ -586,14 +588,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
           <h3 style={{ margin: '0 0 16px 0', color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Add {entryMode === 'adult' ? 'Clients' : 'Athletes'} & Enter Results</h3>
           <div style={{ marginBottom: 16 }}>
-            <AthleteSearchPicker
-              athletes={athletes}
-              value={null}
-              onChange={(id) => { if (id) addAthleteRow(id); }}
-              excludeIds={usedAthleteIds}
-              placeholder={`Search & add ${entryMode === 'adult' ? 'client' : 'athlete'}...`}
-              filterType={entryMode}
-            />
+            <AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => { if (id) addAthleteRow(id); }} excludeIds={usedAthleteIds} placeholder={`Search & add ${entryMode === 'adult' ? 'client' : 'athlete'}...`} filterType={entryMode} />
           </div>
 
           {athleteRows.length > 0 && (
@@ -667,7 +662,7 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); // 'all', 'athlete', 'adult'
+  const [filterType, setFilterType] = useState('all');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthday, setBirthday] = useState('');
@@ -682,28 +677,17 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!firstName || !lastName) return;
-    if (editingId) {
-      updateAthlete(editingId, { firstName, lastName, birthday, gender, email, phone, status, type });
-      setEditingId(null);
-    } else {
-      addAthlete({ firstName, lastName, birthday, gender, email, phone, type });
-    }
-    resetForm();
-    setShowForm(false);
+    if (editingId) { updateAthlete(editingId, { firstName, lastName, birthday, gender, email, phone, status, type }); setEditingId(null); }
+    else { addAthlete({ firstName, lastName, birthday, gender, email, phone, type }); }
+    resetForm(); setShowForm(false);
   };
 
   const handleEdit = (a) => {
-    setEditingId(a.id);
-    setFirstName(a.first_name);
-    setLastName(a.last_name);
+    setEditingId(a.id); setFirstName(a.first_name); setLastName(a.last_name);
     setBirthday(a.birthday ? String(a.birthday).slice(0, 10) : '');
-    setGender(a.gender || 'Male');
-    setEmail(a.email || '');
-    setPhone(a.phone || '');
-    setStatus(a.status || 'Active');
-    setType(a.type || 'athlete');
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setGender(a.gender || 'Male'); setEmail(a.email || ''); setPhone(a.phone || '');
+    setStatus(a.status || 'Active'); setType(a.type || 'athlete');
+    setShowForm(true); window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
@@ -736,27 +720,18 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
             </button>
           ))}
         </div>
-        {searchTerm && <span style={{ color: '#888', fontSize: 14 }}>{filteredAthletes.length} result{filteredAthletes.length !== 1 ? 's' : ''}</span>}
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(0,212,255,0.3)' }}>
           <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff' }}>{editingId ? 'Edit Person' : 'New Person'}</h3>
-
-          {/* Type Toggle */}
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#888' }}>Type</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={() => setType('athlete')} style={{ padding: '10px 20px', background: type === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: type === 'athlete' ? '#0a1628' : '#aaa', fontWeight: type === 'athlete' ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>
-                Youth Athlete
-              </button>
-              <button type="button" onClick={() => setType('adult')} style={{ padding: '10px 20px', background: type === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: type === 'adult' ? '#0a1628' : '#aaa', fontWeight: type === 'adult' ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>
-                Adult Client
-              </button>
+              <button type="button" onClick={() => setType('athlete')} style={{ padding: '10px 20px', background: type === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: type === 'athlete' ? '#0a1628' : '#aaa', fontWeight: type === 'athlete' ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>Youth Athlete</button>
+              <button type="button" onClick={() => setType('adult')} style={{ padding: '10px 20px', background: type === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: type === 'adult' ? '#0a1628' : '#aaa', fontWeight: type === 'adult' ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>Adult Client</button>
             </div>
-            {type === 'adult' && <p style={{ margin: '8px 0 0 0', fontSize: 12, color: '#FFA500' }}>Adult clients will appear in the Adult Clients tab and are excluded from the Record Board.</p>}
           </div>
-
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
             <input type="text" placeholder="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required style={iStyle} />
             <input type="text" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} required style={iStyle} />
@@ -787,15 +762,12 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
                     <h3 style={{ margin: 0, fontSize: 18 }}>{athlete.first_name} {athlete.last_name}</h3>
                     {isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}
                   </div>
-                  <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 14 }}>
-                    {age && (age + ' yrs')}
-                    {athlete.gender && (' · ' + athlete.gender)}
-                  </p>
+                  <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{athlete.gender && (' · ' + athlete.gender)}</p>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <button onClick={() => handleEdit(athlete)} style={{ padding: '4px 10px', background: 'rgba(0,212,255,0.2)', border: 'none', borderRadius: 4, color: '#00d4ff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Edit</button>
                   <button onClick={() => deleteAthlete(athlete.id, `${athlete.first_name} ${athlete.last_name}`)} style={{ padding: '4px 10px', background: 'rgba(255,100,100,0.15)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Delete</button>
-                  <span style={{ padding: '4px 10px', background: athlete.status === 'Active' ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.1)', color: athlete.status === 'Active' ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{athlete.status}</span>
+                  <span style={{ padding: '4px 10px', background: (athlete.status === 'Active' || athlete.status === 'active') ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.1)', color: (athlete.status === 'Active' || athlete.status === 'active') ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{athlete.status}</span>
                 </div>
               </div>
               <div style={{ marginTop: 16, display: 'flex', gap: 24 }}>
@@ -963,7 +935,6 @@ function RecentPRsPage({ athletes, results, getAthleteById }) {
 
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
   const timeLabels = { week: '1 Week', month: '1 Month', quarter: '3 Months' };
-
   const allTestsForFilter = [...Object.values(TESTS), ...Object.values(ADULT_TESTS)].flatMap(c => c.tests).filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i);
 
   return (
@@ -1024,9 +995,7 @@ function RecentPRsPage({ athletes, results, getAthleteById }) {
           })}
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>
-          <p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p>
-        </div>
+        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>
       )}
     </div>
   );
@@ -1042,7 +1011,6 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
 
   const selectedAthleteObj = athletes.find(a => a.id === parseInt(selectedAthlete));
   const isAdult = selectedAthleteObj && selectedAthleteObj.type === 'adult';
-
   const athleteResults = selectedAthlete ? results.filter(r => r.athlete_id === parseInt(selectedAthlete)) : [];
   const filteredResults = selectedTest ? athleteResults.filter(r => r.test_id === selectedTest) : athleteResults;
   const sortedResults = [...filteredResults].sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
@@ -1252,7 +1220,8 @@ function RecordBoardPage({ athletes, results }) {
     { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'bench_press', name: 'Bench', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
-    { id: 'overhead', name: 'Overhead', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
+    // Overhead pulls best across press, push_press, jerk, and legacy 'overhead'
+    { id: '_overhead_rollup', name: 'Overhead', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher', format: v => Math.round(v) },
   ];
 
@@ -1267,6 +1236,16 @@ function RecordBoardPage({ athletes, results }) {
     return age;
   };
 
+  // For overhead rollup: get best value for an athlete across all overhead test_ids
+  const getOverheadBestForAthlete = (athleteId) => {
+    const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
+    const vals = results
+      .filter(r => r.athlete_id === athleteId && overheadIds.includes(r.test_id))
+      .map(r => parseFloat(r.converted_value || r.raw_value))
+      .filter(v => !isNaN(v));
+    return vals.length > 0 ? Math.max(...vals) : null;
+  };
+
   const buildRecords = (tests) => {
     const athleteMap = {};
     athletes.forEach(a => { athleteMap[a.id] = a; });
@@ -1274,25 +1253,47 @@ function RecordBoardPage({ athletes, results }) {
 
     tests.forEach(test => {
       records[test.id] = { hs: [], ms: [] };
-      results.forEach(r => {
-        if (r.test_id !== test.id) return;
-        const a = athleteMap[r.athlete_id];
-        if (!a) return;
-        // EXCLUDE adult clients from record board
-        if (a.type === 'adult') return;
-        const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
-        if (EXCLUDED.includes(fullName)) return;
-        const g = (a.gender || '').toLowerCase();
-        const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
-        if (!isMatch) return;
-        const val = parseFloat(r.converted_value || r.raw_value);
-        if (isNaN(val)) return;
-        const age = getAgeAtTest(a.birthday, r.test_date);
-        const isMSAge = age !== null && age < 15;
-        const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val };
-        records[test.id]['hs'].push(entry);
-        if (isMSAge) records[test.id]['ms'].push(entry);
-      });
+
+      if (test.id === '_overhead_rollup') {
+        // Special rollup: get best overhead per athlete
+        athletes.forEach(a => {
+          if (a.type === 'adult') return;
+          const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
+          if (EXCLUDED.includes(fullName)) return;
+          const g = (a.gender || '').toLowerCase();
+          const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
+          if (!isMatch) return;
+          const best = getOverheadBestForAthlete(a.id);
+          if (best === null) return;
+          // For age classification, use oldest result date among overhead tests
+          const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
+          const overheadResults = results.filter(r => r.athlete_id === a.id && overheadIds.includes(r.test_id));
+          const firstDate = overheadResults.length > 0 ? overheadResults.sort((x, y) => new Date(x.test_date) - new Date(y.test_date))[0].test_date : null;
+          const age = firstDate ? getAgeAtTest(a.birthday, firstDate) : null;
+          const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: best };
+          records[test.id]['hs'].push(entry);
+          if (age !== null && age < 15) records[test.id]['ms'].push(entry);
+        });
+      } else {
+        results.forEach(r => {
+          if (r.test_id !== test.id) return;
+          const a = athleteMap[r.athlete_id];
+          if (!a) return;
+          if (a.type === 'adult') return;
+          const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
+          if (EXCLUDED.includes(fullName)) return;
+          const g = (a.gender || '').toLowerCase();
+          const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
+          if (!isMatch) return;
+          const val = parseFloat(r.converted_value || r.raw_value);
+          if (isNaN(val)) return;
+          const age = getAgeAtTest(a.birthday, r.test_date);
+          const isMSAge = age !== null && age < 15;
+          const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val };
+          records[test.id]['hs'].push(entry);
+          if (isMSAge) records[test.id]['ms'].push(entry);
+        });
+      }
 
       ['hs', 'ms'].forEach(cat => {
         records[test.id][cat].sort((a, b) => test.direction === 'lower' ? a.value - b.value : b.value - a.value);
@@ -1406,11 +1407,10 @@ function RecordBoardPage({ athletes, results }) {
 function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById }) {
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedTest, setSelectedTest] = useState('');
-  const [view, setView] = useState('overview'); // 'overview', 'entry', 'progress'
+  const [view, setView] = useState('overview');
 
-  const adultClients = athletes.filter(a => a.type === 'adult' && a.status === 'Active');
+  const adultClients = athletes.filter(a => (a.type === 'adult') && (a.status === 'Active' || a.status === 'active'));
   const client = adultClients.find(a => a.id === selectedClient);
-
   const clientResults = selectedClient ? results.filter(r => r.athlete_id === selectedClient) : [];
   const testResults = selectedTest && selectedClient
     ? clientResults.filter(r => r.test_id === selectedTest)
@@ -1421,8 +1421,6 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
   const test = selectedTest ? getTestById(selectedTest) : null;
   const currentPR = selectedClient && selectedTest ? getPR(selectedClient, selectedTest) : null;
 
-  const allAdultTests = Object.values(ADULT_TESTS).flatMap(c => c.tests);
-
   const formatVal = (t, v) => {
     if (v === null || v === undefined) return '-';
     if (isFeetInchesTest(t.id)) return formatFeetInches(v);
@@ -1431,7 +1429,6 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
     return v + ' ' + (t.displayUnit || t.unit);
   };
 
-  // Get most recent value for each test (not necessarily PR)
   const getMostRecent = (clientId, testId) => {
     const ar = results.filter(r => r.athlete_id === clientId && r.test_id === testId).sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
     return ar.length > 0 ? parseFloat(ar[0].converted_value) : null;
@@ -1454,38 +1451,27 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
         </div>
       ) : (
         <>
-          {/* Client grid overview */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginBottom: 32 }}>
             {adultClients.map(c => {
               const cr = results.filter(r => r.athlete_id === c.id);
               const recentWeight = getMostRecent(c.id, 'body_weight');
               const recentBF = getMostRecent(c.id, 'body_fat_pct');
+              const recentSMM = getMostRecent(c.id, 'lean_muscle_mass');
               const prRow = getPR(c.id, '500m_row');
-              const prVert = getPR(c.id, 'vertical_jump');
               const age = calculateAge(c.birthday);
               const isSelected = selectedClient === c.id;
 
               return (
-                <div
-                  key={c.id}
-                  onClick={() => setSelectedClient(isSelected ? null : c.id)}
-                  style={{ background: isSelected ? 'rgba(255,165,0,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `2px solid ${isSelected ? '#FFA500' : 'rgba(255,165,0,0.15)'}`, cursor: 'pointer', transition: 'all 0.15s' }}
-                >
+                <div key={c.id} onClick={() => setSelectedClient(isSelected ? null : c.id)}
+                  style={{ background: isSelected ? 'rgba(255,165,0,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `2px solid ${isSelected ? '#FFA500' : 'rgba(255,165,0,0.15)'}`, cursor: 'pointer', transition: 'all 0.15s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 12 }}>
                     <div>
                       <h3 style={{ margin: 0, fontSize: 18 }}>{c.first_name} {c.last_name}</h3>
-                      <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 13 }}>
-                        {age && `${age} yrs`}{c.gender && ` · ${c.gender}`}
-                      </p>
+                      <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 13 }}>{age && `${age} yrs`}{c.gender && ` · ${c.gender}`}</p>
                     </div>
                     <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '3px 10px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>
                   </div>
-
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: '#00d4ff' }}>{cr.length}</div>
-                      <div style={{ fontSize: 11, color: '#666' }}>Tests</div>
-                    </div>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 16, fontWeight: 700, color: recentWeight ? '#e8e8e8' : '#555' }}>{recentWeight ? Math.round(recentWeight) : '—'}</div>
                       <div style={{ fontSize: 11, color: '#666' }}>lbs</div>
@@ -1493,6 +1479,10 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 16, fontWeight: 700, color: recentBF ? '#e8e8e8' : '#555' }}>{recentBF ? recentBF + '%' : '—'}</div>
                       <div style={{ fontSize: 11, color: '#666' }}>BF%</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: recentSMM ? '#e8e8e8' : '#555' }}>{recentSMM ? Math.round(recentSMM) : '—'}</div>
+                      <div style={{ fontSize: 11, color: '#666' }}>SMM lbs</div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 16, fontWeight: 700, color: prRow ? '#00ff88' : '#555' }}>{prRow ? formatRowTime(prRow) : '—'}</div>
@@ -1504,47 +1494,42 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
             })}
           </div>
 
-          {/* Selected client detail */}
           {client && (
             <div style={{ background: 'rgba(255,165,0,0.05)', borderRadius: 16, padding: 28, border: '1px solid rgba(255,165,0,0.2)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
                 <h2 style={{ margin: 0, fontSize: 24, color: '#FFA500' }}>{client.first_name} {client.last_name}</h2>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {['overview', 'progress'].map(v => (
-                    <button key={v} onClick={() => setView(v)} style={{ padding: '8px 16px', background: view === v ? 'rgba(255,165,0,0.3)' : 'rgba(255,255,255,0.05)', border: view === v ? '1px solid #FFA500' : '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: view === v ? '#FFA500' : '#aaa', cursor: 'pointer', fontSize: 13, fontWeight: view === v ? 600 : 400, textTransform: 'capitalize' }}>
-                      {v}
-                    </button>
+                    <button key={v} onClick={() => setView(v)} style={{ padding: '8px 16px', background: view === v ? 'rgba(255,165,0,0.3)' : 'rgba(255,255,255,0.05)', border: view === v ? '1px solid #FFA500' : '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: view === v ? '#FFA500' : '#aaa', cursor: 'pointer', fontSize: 13, fontWeight: view === v ? 600 : 400, textTransform: 'capitalize' }}>{v}</button>
                   ))}
                 </div>
               </div>
 
               {view === 'overview' && (
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
-                    {Object.entries(ADULT_TESTS).map(([k, cat]) => (
-                      <div key={k} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 16 }}>
-                        <h4 style={{ color: '#FFA500', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, margin: '0 0 12px 0' }}>{cat.label}</h4>
-                        {cat.tests.map(t => {
-                          const pr = getPR(client.id, t.id);
-                          const recent = getMostRecent(client.id, t.id);
-                          const allForTest = results.filter(r => r.athlete_id === client.id && r.test_id === t.id).sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
-                          const lastDate = allForTest.length > 0 ? new Date(allForTest[0].test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
-                          return (
-                            <div key={t.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                <span style={{ color: '#aaa', fontSize: 14 }}>{t.name}</span>
-                                <span style={{ fontWeight: 700, fontSize: 16, color: recent !== null ? '#00ff88' : '#555' }}>{formatVal(t, recent)}</span>
-                              </div>
-                              {pr !== null && recent !== null && pr !== recent && (
-                                <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>PR: {formatVal(t, pr)}</div>
-                              )}
-                              {lastDate && <div style={{ fontSize: 11, color: '#555', textAlign: 'right' }}>{lastDate}</div>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
+                  {Object.entries(ADULT_TESTS).map(([k, cat]) => (
+                    <div key={k} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 16 }}>
+                      <h4 style={{ color: '#FFA500', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, margin: '0 0 12px 0' }}>{cat.label}</h4>
+                      {cat.tests.map(t => {
+                        const pr = getPR(client.id, t.id);
+                        const recent = getMostRecent(client.id, t.id);
+                        const allForTest = results.filter(r => r.athlete_id === client.id && r.test_id === t.id).sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
+                        const lastDate = allForTest.length > 0 ? new Date(allForTest[0].test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                        return (
+                          <div key={t.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                              <span style={{ color: '#aaa', fontSize: 14 }}>{t.name}</span>
+                              <span style={{ fontWeight: 700, fontSize: 16, color: recent !== null ? '#00ff88' : '#555' }}>{formatVal(t, recent)}</span>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
+                            {pr !== null && recent !== null && pr !== recent && (
+                              <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>PR: {formatVal(t, pr)}</div>
+                            )}
+                            {lastDate && <div style={{ fontSize: 11, color: '#555', textAlign: 'right' }}>{lastDate}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
 
