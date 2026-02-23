@@ -1,3 +1,5 @@
+javascript
+
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -26,53 +28,91 @@ const formatTestValue = (testId, value) => {
 
 const preventScrollChange = (e) => { e.target.blur(); };
 
+/* ===================== TEST DEFINITIONS ===================== */
+/* Tests tagged with adultTest:true are available for adults.
+   Tests tagged with athleteOnly:true are hidden from adults.
+   Tests with neither are available for both. */
+
 const TESTS = {
   speed: { label: 'Speed & Acceleration', tests: [
-    { id: 'max_velocity', name: 'Max Velocity', unit: 'split sec', direction: 'higher', convert: (v) => (20.45 / v).toFixed(2), displayUnit: 'MPH' },
+    { id: 'max_velocity', name: 'Max Velocity', unit: 'split sec', direction: 'higher', convert: (v) => (20.45 / v).toFixed(2), displayUnit: 'MPH', athleteOnly: true },
     { id: '5_10_fly', name: '5-10 Fly', unit: 'sec', direction: 'lower' },
-    { id: '10_20_fly', name: '10-20 Fly', unit: 'sec', direction: 'lower' },
-    { id: '20_10_fly', name: '20-10 Fly', unit: 'sec', direction: 'lower' },
-    { id: '40_yard', name: '40-Yard Dash', unit: 'sec', direction: 'lower' },
-    { id: '60_yard', name: '60-Yard Dash', unit: 'sec', direction: 'lower' },
-    { id: '80m', name: '80m', unit: 'sec', direction: 'lower' },
-    { id: '100m', name: '100m', unit: 'sec', direction: 'lower' },
-    { id: '150m', name: '150m', unit: 'sec', direction: 'lower' },
+    { id: '10_20_fly', name: '10-20 Fly', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '20_10_fly', name: '20-10 Fly', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '40_yard', name: '40-Yard Dash', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '60_yard', name: '60-Yard Dash', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '80m', name: '80m', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '100m', name: '100m', unit: 'sec', direction: 'lower', athleteOnly: true },
+    { id: '150m', name: '150m', unit: 'sec', direction: 'lower', athleteOnly: true },
   ]},
   agility: { label: 'Change of Direction', tests: [
-    { id: '5_10_5', name: '5-10-5', unit: 'sec', direction: 'lower' },
+    { id: '5_10_5', name: '5-10-5', unit: 'sec', direction: 'lower', athleteOnly: true },
     { id: '5_0_5', name: '5-0-5', unit: 'sec', direction: 'lower' },
   ]},
   power: { label: 'Power', tests: [
     { id: 'broad_jump', name: 'Broad Jump', unit: 'inches', direction: 'higher' },
     { id: 'vertical_jump', name: 'Vertical Jump', unit: 'inches', direction: 'higher' },
-    { id: 'approach_jump', name: 'Approach Jump', unit: 'inches', direction: 'higher' },
-    { id: 'rsi', name: 'RSI', unit: 'ratio', direction: 'higher' },
-    { id: 'sl_rsi_l', name: 'Single-Leg RSI Left', unit: 'ratio', direction: 'higher' },
-    { id: 'sl_rsi_r', name: 'Single-Leg RSI Right', unit: 'ratio', direction: 'higher' },
+    { id: 'approach_jump', name: 'Approach Jump', unit: 'inches', direction: 'higher', athleteOnly: true },
+    { id: 'rsi', name: 'RSI', unit: 'ratio', direction: 'higher', athleteOnly: true },
+    { id: 'sl_rsi_l', name: 'Single-Leg RSI Left', unit: 'ratio', direction: 'higher', athleteOnly: true },
+    { id: 'sl_rsi_r', name: 'Single-Leg RSI Right', unit: 'ratio', direction: 'higher', athleteOnly: true },
   ]},
   strength: { label: 'Strength', tests: [
-    { id: 'back_squat', name: 'Back Squat', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'bench_press', name: 'Bench Press', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'overhead', name: 'Overhead', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'clean', name: 'Clean', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'snatch', name: 'Snatch', unit: 'lbs', direction: 'higher', allowKg: true },
-    { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher' },
+    { id: 'back_squat', name: 'Back Squat', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'bench_press', name: 'Bench Press', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'overhead', name: 'Overhead', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'clean', name: 'Clean', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'snatch', name: 'Snatch', unit: 'lbs', direction: 'higher', allowKg: true, athleteOnly: true },
+    { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher', athleteOnly: true },
+  ]},
+  endurance: { label: 'Endurance', tests: [
+    { id: '500m_row', name: '500m Row', unit: 'sec', direction: 'lower', adultOnly: true },
+  ]},
+  body_comp: { label: 'Body Composition', tests: [
+    { id: 'body_weight', name: 'Body Weight', unit: 'lbs', direction: 'lower', adultOnly: true },
+    { id: 'body_fat_pct', name: 'Body Fat %', unit: '%', direction: 'lower', adultOnly: true },
+    { id: 'lean_muscle_mass', name: 'Lean Muscle Mass', unit: 'lbs', direction: 'higher', adultOnly: true },
   ]}
 };
 
 const getAllTests = () => { const all = []; Object.values(TESTS).forEach(c => c.tests.forEach(t => all.push(t))); return all; };
 const getTestById = (id) => getAllTests().find(t => t.id === id);
+
+/* Get tests filtered by person type */
+const getTestsForType = (type) => {
+  const filtered = {};
+  Object.entries(TESTS).forEach(([key, category]) => {
+    const tests = category.tests.filter(t => {
+      if (type === 'adult') return !t.athleteOnly;
+      return !t.adultOnly;
+    });
+    if (tests.length > 0) filtered[key] = { ...category, tests };
+  });
+  return filtered;
+};
+
 const calculateAge = (birthday) => { if (!birthday) return null; const today = new Date(); const birth = new Date(String(birthday).slice(0,10)+'T00:00:00'); let age = today.getFullYear() - birth.getFullYear(); const m = today.getMonth() - birth.getMonth(); if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--; return age; };
 
-function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...' }) {
+/* Format 500m row time: input in seconds, display as M:SS */
+const formatRowTime = (seconds) => {
+  if (seconds === null || seconds === undefined || isNaN(seconds)) return '-';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+};
+
+function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...', filterType = null }) {
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
   const ref = React.useRef(null);
   const selectedAthlete = athletes.find(a => a.id === value);
-  const filtered = athletes.filter(a => a.status === 'Active' && !excludeIds.includes(a.id)).filter(a => !search || `${a.first_name} ${a.last_name}`.toLowerCase().includes(search.toLowerCase()));
+  const filtered = athletes
+    .filter(a => a.status === 'Active' && !excludeIds.includes(a.id))
+    .filter(a => !filterType || (a.type || 'athlete') === filterType)
+    .filter(a => !search || `${a.first_name} ${a.last_name}`.toLowerCase().includes(search.toLowerCase()));
 
   useEffect(() => {
     const handleClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); };
@@ -98,8 +138,12 @@ function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], place
         <input type="text" value={search} placeholder={placeholder} onChange={(e) => { setSearch(e.target.value); setHighlightIndex(0); setIsOpen(true); }} onFocus={() => setIsOpen(true)} onKeyDown={handleKeyDown} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 8, color: '#fff', fontSize: 16, minHeight: 48 }} />
       )}
       {isOpen && (<div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: 250, overflowY: 'auto', background: '#1a2744', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, marginTop: 4, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
-        {filtered.slice(0, 30).map((a, i) => (<div key={a.id} onClick={() => handleSelect(a)} onMouseEnter={() => setHighlightIndex(i)} style={{ padding: '10px 16px', cursor: 'pointer', background: i === highlightIndex ? 'rgba(0,212,255,0.2)' : 'transparent', color: '#fff', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{a.first_name} {a.last_name} {a.birthday && <span style={{ color: '#888', fontSize: 12 }}>• {calculateAge(a.birthday)} yrs</span>}</div>))}
-        {filtered.length === 0 && <div style={{ padding: '10px 16px', color: '#666', fontSize: 14 }}>No athletes found</div>}
+        {filtered.slice(0, 30).map((a, i) => (<div key={a.id} onClick={() => handleSelect(a)} onMouseEnter={() => setHighlightIndex(i)} style={{ padding: '10px 16px', cursor: 'pointer', background: i === highlightIndex ? 'rgba(0,212,255,0.2)' : 'transparent', color: '#fff', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          {a.first_name} {a.last_name}
+          {a.birthday && <span style={{ color: '#888', fontSize: 12 }}> • {calculateAge(a.birthday)} yrs</span>}
+          {(a.type === 'adult') && <span style={{ color: '#f0a500', fontSize: 11, marginLeft: 8 }}>ADULT</span>}
+        </div>))}
+        {filtered.length === 0 && <div style={{ padding: '10px 16px', color: '#666', fontSize: 14 }}>No results found</div>}
       </div>)}
     </div>
   );
@@ -151,6 +195,45 @@ function FeetInchesInput({ value, onChange, style = {} }) {
   );
 }
 
+/* ===================== ROW TIME INPUT (M:SS) ===================== */
+function RowTimeInput({ value, onChange }) {
+  const [mins, setMins] = useState('');
+  const [secs, setSecs] = useState('');
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (!initialized && value !== '' && value !== undefined && value !== null) {
+      const total = parseFloat(value);
+      if (!isNaN(total)) {
+        setMins(String(Math.floor(total / 60)));
+        setSecs(String(Math.round(total % 60)));
+      }
+      setInitialized(true);
+    } else if (value === '' || value === undefined || value === null) {
+      if (initialized) { setMins(''); setSecs(''); }
+    }
+  }, [value, initialized]);
+
+  const handleChange = (newMins, newSecs) => {
+    setMins(newMins);
+    setSecs(newSecs);
+    const m = newMins !== '' ? parseInt(newMins) : 0;
+    const s = newSecs !== '' ? parseInt(newSecs) : 0;
+    if (newMins === '' && newSecs === '') onChange('');
+    else onChange(String(m * 60 + s));
+  };
+
+  const inputStyle = { width: 44, padding: '8px 4px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' };
+
+  return (
+    <div style={{ display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'center' }}>
+      <input type="number" min="0" max="9" placeholder="m" value={mins} onChange={(e) => handleChange(e.target.value, secs)} onWheel={preventScrollChange} style={inputStyle} />
+      <span style={{ color: '#888', fontSize: 16, fontWeight: 700 }}>:</span>
+      <input type="number" min="0" max="59" placeholder="ss" value={secs} onChange={(e) => handleChange(mins, e.target.value)} onWheel={preventScrollChange} style={{ ...inputStyle, width: 48 }} />
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState('entry');
   const [athletes, setAthletes] = useState([]);
@@ -180,15 +263,51 @@ export default function App() {
 
   const addAthlete = async (athlete) => {
     const age = athlete.birthday ? calculateAge(athlete.birthday) : null;
-    const { data, error } = await supabase.from('athletes').insert([{ first_name: athlete.firstName, last_name: athlete.lastName, email: athlete.email||'', phone: athlete.phone||'', birthday: athlete.birthday||null, age, gender: athlete.gender, status: 'Active' }]).select();
+    const insertData = {
+      first_name: athlete.firstName,
+      last_name: athlete.lastName,
+      email: athlete.email||'',
+      phone: athlete.phone||'',
+      birthday: athlete.birthday||null,
+      age,
+      gender: athlete.gender,
+      status: 'Active',
+      type: athlete.type || 'athlete'
+    };
+    // Add adult-specific fields
+    if (athlete.type === 'adult') {
+      insertData.body_weight = athlete.bodyWeight || null;
+      insertData.body_fat_pct = athlete.bodyFatPct || null;
+      insertData.lean_muscle_mass = athlete.leanMuscleMass || null;
+    }
+    const { data, error } = await supabase.from('athletes').insert([insertData]).select();
     if (data) { setAthletes([...athletes, data[0]].sort((a,b) => a.first_name.localeCompare(b.first_name))); showNotification(athlete.firstName + ' ' + athlete.lastName + ' added!'); }
     if (error) showNotification('Error adding athlete','error');
   };
 
   const updateAthlete = async (id, updates) => {
     const age = updates.birthday ? calculateAge(updates.birthday) : null;
-    const { error } = await supabase.from('athletes').update({ first_name: updates.firstName, last_name: updates.lastName, email: updates.email, phone: updates.phone, birthday: updates.birthday||null, age, gender: updates.gender, status: updates.status }).eq('id', id);
-    if (!error) { setAthletes(athletes.map(a => a.id === id ? { ...a, first_name: updates.firstName, last_name: updates.lastName, email: updates.email, phone: updates.phone, birthday: updates.birthday, age, gender: updates.gender, status: updates.status } : a)); showNotification('Athlete updated!'); }
+    const updateData = {
+      first_name: updates.firstName,
+      last_name: updates.lastName,
+      email: updates.email,
+      phone: updates.phone,
+      birthday: updates.birthday||null,
+      age,
+      gender: updates.gender,
+      status: updates.status,
+      type: updates.type || 'athlete'
+    };
+    if (updates.type === 'adult') {
+      updateData.body_weight = updates.bodyWeight || null;
+      updateData.body_fat_pct = updates.bodyFatPct || null;
+      updateData.lean_muscle_mass = updates.leanMuscleMass || null;
+    }
+    const { error } = await supabase.from('athletes').update(updateData).eq('id', id);
+    if (!error) {
+      setAthletes(athletes.map(a => a.id === id ? { ...a, ...updateData } : a));
+      showNotification('Updated!');
+    }
   };
 
   const deleteAthlete = async (id, athleteName) => {
@@ -300,7 +419,9 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
   const [submittedResults, setSubmittedResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [entryMode, setEntryMode] = useState('athlete'); // 'athlete' or 'adult'
 
+  const testsForMode = getTestsForType(entryMode);
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.allowKg; });
 
   const toggleTest = (testId) => {
@@ -330,11 +451,16 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 
   const usedAthleteIds = athleteRows.map(r => r.athleteId);
 
-  // FIX 2: Reset for next group
   const startNextGroup = () => {
     setAthleteRows([]);
     setSubmittedResults([]);
     setShowSummary(false);
+  };
+
+  const switchEntryMode = (mode) => {
+    setEntryMode(mode);
+    setSelectedTests([]);
+    setAthleteRows([]);
   };
 
   const handleSubmit = async () => {
@@ -347,9 +473,8 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
         const test = getTestById(testId);
         let raw = parseFloat(val);
         let cv = raw;
-        // FIX 1: If entering in kg, convert to lbs (stored as lbs always, displayed as lbs everywhere)
         if (test.allowKg && useKg) {
-          cv = Math.round(raw * 2.205); // convert kg -> lbs, round to nearest whole number
+          cv = Math.round(raw * 2.205);
         }
         if (test.convert) cv = parseFloat(test.convert(raw));
         toLog.push({
@@ -358,7 +483,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
           testDate,
           rawValue: raw,
           convertedValue: cv,
-          // always store as lbs internally — unit field just records what was entered
           unit: test.allowKg && useKg ? 'kg' : test.unit
         });
       });
@@ -372,7 +496,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
       return {
         athlete: (a ? a.first_name + ' ' + a.last_name : 'Unknown'),
         test: t ? t.name : r.test_id,
-        // FIX 1: always show converted_value (lbs) in summary
         value: r.converted_value,
         testId: r.test_id,
         unit: t ? (t.displayUnit || t.unit) : '',
@@ -386,7 +509,12 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
-  // FIX 2: Show PR summary screen after submit
+  const formatEntryValue = (testId, value) => {
+    if (isFeetInchesTest(testId)) return formatFeetInches(value);
+    if (testId === '500m_row') return formatRowTime(value);
+    return Math.round(value);
+  };
+
   if (showSummary) {
     const prResults = submittedResults.filter(r => r.isPR);
     const nonPRResults = submittedResults.filter(r => !r.isPR);
@@ -402,7 +530,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
               <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 16 }}>{r.athlete} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>— {r.test}</span></span>
                 <span style={{ color: '#00ff88', fontWeight: 800, fontSize: 18 }}>
-                  {isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : Math.round(r.value)} {!isFeetInchesTest(r.testId) && r.unit}
+                  {formatEntryValue(r.testId, r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
                 </span>
               </div>
             ))}
@@ -416,7 +544,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
               <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between' }}>
                 <span><span style={{ fontWeight: 600 }}>{r.athlete}</span> — {r.test}</span>
                 <span style={{ color: '#00d4ff' }}>
-                  {isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : Math.round(r.value)} {!isFeetInchesTest(r.testId) && r.unit}
+                  {formatEntryValue(r.testId, r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
                 </span>
               </div>
             ))}
@@ -440,12 +568,22 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
         <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Session Setup</h3>
+
+        {/* Athlete/Adult toggle */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Entry Mode</label>
+          <div style={{ display: 'flex', gap: 8, width: 280 }}>
+            <button onClick={() => switchEntryMode('athlete')} style={{ flex: 1, padding: '12px', background: entryMode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: entryMode === 'athlete' ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: entryMode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>🏃 Athlete</button>
+            <button onClick={() => switchEntryMode('adult')} style={{ flex: 1, padding: '12px', background: entryMode === 'adult' ? 'linear-gradient(135deg, #f0a500 0%, #cc8800 100%)' : 'rgba(255,255,255,0.05)', border: entryMode === 'adult' ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: entryMode === 'adult' ? '#0a1628' : '#aaa', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>💪 Adult</button>
+          </div>
+        </div>
+
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Test Date</label>
           <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} style={{ ...iStyle, width: 220 }} />
         </div>
         <label style={{ display: 'block', marginBottom: 12, fontSize: 14, color: '#aaa' }}>Select Tests for This Session</label>
-        {Object.entries(TESTS).map(([key, category]) => (
+        {Object.entries(testsForMode).map(([key, category]) => (
           <div key={key} style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>{category.label}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -458,7 +596,6 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
         ))}
         {anyStrength && (
           <div style={{ marginTop: 16 }}>
-            {/* FIX 1: Toggle label updated + note about storage */}
             <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>
               Strength Unit <span style={{ color: '#555', fontSize: 12 }}>(always stored & displayed as lbs)</span>
             </label>
@@ -473,22 +610,20 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
 
       {selectedTests.length > 0 && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
-          <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Add Athletes & Enter Results</h3>
+          <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Add {entryMode === 'adult' ? 'Adults' : 'Athletes'} & Enter Results</h3>
           <div style={{ marginBottom: 16 }}>
-            <AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => { if (id) addAthleteRow(id); }} excludeIds={usedAthleteIds} placeholder="Search & add athlete..." />
+            <AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => { if (id) addAthleteRow(id); }} excludeIds={usedAthleteIds} filterType={entryMode} placeholder={`Search & add ${entryMode}...`} />
           </div>
 
           {athleteRows.length > 0 && (
             <div style={{ overflowX: 'auto' }}>
-              {/* FIX 1: Column header shows kg or lbs based on toggle */}
               <div style={{ display: 'flex', gap: 8, padding: '0 0 8px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 8, minWidth: 'fit-content' }}>
-                <div style={{ minWidth: 140, fontSize: 12, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1 }}>Athlete</div>
+                <div style={{ minWidth: 140, fontSize: 12, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1 }}>{entryMode === 'adult' ? 'Client' : 'Athlete'}</div>
                 {selectedTests.map(tid => {
                   const t = getTestById(tid);
-                  // FIX 1: show kg label in header when kg mode is on for strength tests
                   const headerUnit = t && t.allowKg && useKg ? 'kg' : '';
                   return (
-                    <div key={tid} style={{ minWidth: isFeetInchesTest(tid) ? 130 : 100, flex: 1, fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>
+                    <div key={tid} style={{ minWidth: isFeetInchesTest(tid) ? 130 : (tid === '500m_row' ? 120 : 100), flex: 1, fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>
                       {t ? t.name : tid}
                       {headerUnit && <span style={{ color: '#f0a500', display: 'block', fontSize: 10 }}>{headerUnit}</span>}
                     </div>
@@ -509,16 +644,17 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
                       const t = getTestById(tid);
                       const pr = getPR(row.athleteId, tid);
                       const useFeetInches = isFeetInchesTest(tid);
-                      // FIX 1: show PR in correct unit — PR is stored as lbs, show as kg if in kg mode
+                      const isRowTime = tid === '500m_row';
                       const prDisplay = pr !== null
-                        ? (t && t.allowKg && useKg ? Math.round(pr / 2.205) + ' kg' : (useFeetInches ? formatFeetInches(pr) : pr + ' ' + (t ? t.unit : '')))
+                        ? (t && t.allowKg && useKg ? Math.round(pr / 2.205) + ' kg' : (useFeetInches ? formatFeetInches(pr) : (isRowTime ? formatRowTime(pr) : pr + ' ' + (t ? t.unit : ''))))
                         : null;
-                      // FIX 1: placeholder reflects current input unit
                       const inputPlaceholder = t && t.allowKg && useKg ? 'kg' : (t ? t.unit : 'val');
                       return (
-                        <div key={tid} style={{ minWidth: useFeetInches ? 130 : 100, flex: 1 }}>
+                        <div key={tid} style={{ minWidth: useFeetInches ? 130 : (isRowTime ? 120 : 100), flex: 1 }}>
                           {useFeetInches ? (
                             <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} />
+                          ) : isRowTime ? (
+                            <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} />
                           ) : (
                             <input
                               type="number"
@@ -540,7 +676,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
               })}
             </div>
           )}
-          {athleteRows.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Search and add athletes above</div>}
+          {athleteRows.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Search and add {entryMode === 'adult' ? 'adults' : 'athletes'} above</div>}
         </div>
       )}
 
@@ -556,6 +692,7 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthday, setBirthday] = useState('');
@@ -563,17 +700,27 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState('Active');
+  const [type, setType] = useState('athlete');
+  const [bodyWeight, setBodyWeight] = useState('');
+  const [bodyFatPct, setBodyFatPct] = useState('');
+  const [leanMuscleMass, setLeanMuscleMass] = useState('');
 
-  const resetForm = () => { setFirstName(''); setLastName(''); setBirthday(''); setGender('Male'); setEmail(''); setPhone(''); setStatus('Active'); };
+  const resetForm = () => { setFirstName(''); setLastName(''); setBirthday(''); setGender('Male'); setEmail(''); setPhone(''); setStatus('Active'); setType('athlete'); setBodyWeight(''); setBodyFatPct(''); setLeanMuscleMass(''); };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!firstName || !lastName) return;
+    const data = { firstName, lastName, birthday, gender, email, phone, type, status };
+    if (type === 'adult') {
+      data.bodyWeight = bodyWeight ? parseFloat(bodyWeight) : null;
+      data.bodyFatPct = bodyFatPct ? parseFloat(bodyFatPct) : null;
+      data.leanMuscleMass = leanMuscleMass ? parseFloat(leanMuscleMass) : null;
+    }
     if (editingId) {
-      updateAthlete(editingId, { firstName, lastName, birthday, gender, email, phone, status });
+      updateAthlete(editingId, data);
       setEditingId(null);
     } else {
-      addAthlete({ firstName, lastName, birthday, gender, email, phone });
+      addAthlete(data);
     }
     resetForm();
     setShowForm(false);
@@ -588,6 +735,10 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
     setEmail(a.email || '');
     setPhone(a.phone || '');
     setStatus(a.status || 'Active');
+    setType(a.type || 'athlete');
+    setBodyWeight(a.body_weight ? String(a.body_weight) : '');
+    setBodyFatPct(a.body_fat_pct ? String(a.body_fat_pct) : '');
+    setLeanMuscleMass(a.lean_muscle_mass ? String(a.lean_muscle_mass) : '');
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -595,28 +746,50 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
   const filteredAthletes = athletes.filter(a => {
-    if (!searchTerm) return true;
-    return (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase());
+    if (!searchTerm && filterType === 'all') return true;
+    const nameMatch = !searchTerm || (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase());
+    const typeMatch = filterType === 'all' || (a.type || 'athlete') === filterType;
+    return nameMatch && typeMatch;
   });
+
+  const athleteCount = athletes.filter(a => (a.type || 'athlete') === 'athlete').length;
+  const adultCount = athletes.filter(a => a.type === 'adult').length;
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Athletes</h1>
-          <p style={{ color: '#888' }}>{athletes.length} athletes registered</p>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Athletes & Clients</h1>
+          <p style={{ color: '#888' }}>{athleteCount} athletes • {adultCount} adults</p>
         </div>
-        <button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} style={{ padding: '14px 28px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add Athlete</button>
+        <button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} style={{ padding: '14px 28px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add New</button>
       </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <input type="text" placeholder="Search athletes by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: '100%', maxWidth: 400, ...iStyle }} />
-        {searchTerm && <span style={{ marginLeft: 12, color: '#888', fontSize: 14 }}>{filteredAthletes.length} result{filteredAthletes.length !== 1 ? 's' : ''}</span>}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input type="text" placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ flex: '1 1 250px', maxWidth: 400, ...iStyle }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          {['all', 'athlete', 'adult'].map(ft => (
+            <button key={ft} onClick={() => setFilterType(ft)} style={{ padding: '10px 16px', background: filterType === ft ? (ft === 'adult' ? 'linear-gradient(135deg, #f0a500, #cc8800)' : 'linear-gradient(135deg, #00d4ff, #0099cc)') : 'rgba(255,255,255,0.05)', border: filterType === ft ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: filterType === ft ? '#0a1628' : '#aaa', fontWeight: filterType === ft ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>
+              {ft === 'all' ? 'All' : ft === 'athlete' ? '🏃 Athletes' : '💪 Adults'}
+            </button>
+          ))}
+        </div>
+        {searchTerm && <span style={{ color: '#888', fontSize: 14 }}>{filteredAthletes.length} result{filteredAthletes.length !== 1 ? 's' : ''}</span>}
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(0,212,255,0.3)' }}>
-          <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff' }}>{editingId ? 'Edit Athlete' : 'New Athlete'}</h3>
+          <h3 style={{ margin: '0 0 16px 0', color: '#00d4ff' }}>{editingId ? 'Edit' : 'New'} {type === 'adult' ? 'Adult Client' : 'Athlete'}</h3>
+
+          {/* Type selector */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Type</label>
+            <div style={{ display: 'flex', gap: 8, width: 280 }}>
+              <button type="button" onClick={() => setType('athlete')} style={{ flex: 1, padding: '10px', background: type === 'athlete' ? 'linear-gradient(135deg, #00d4ff, #0099cc)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: type === 'athlete' ? '#0a1628' : '#fff', fontWeight: 600, cursor: 'pointer' }}>🏃 Athlete</button>
+              <button type="button" onClick={() => setType('adult')} style={{ flex: 1, padding: '10px', background: type === 'adult' ? 'linear-gradient(135deg, #f0a500, #cc8800)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: type === 'adult' ? '#0a1628' : '#fff', fontWeight: 600, cursor: 'pointer' }}>💪 Adult</button>
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
             <input type="text" placeholder="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required style={iStyle} />
             <input type="text" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} required style={iStyle} />
@@ -626,8 +799,30 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
             <input type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} style={iStyle} />
             {editingId && <select value={status} onChange={(e) => setStatus(e.target.value)} style={iStyle}><option>Active</option><option>Inactive</option></select>}
           </div>
+
+          {/* Adult-specific fields */}
+          {type === 'adult' && (
+            <div style={{ marginTop: 16, padding: 16, background: 'rgba(240,165,0,0.08)', borderRadius: 8, border: '1px solid rgba(240,165,0,0.2)' }}>
+              <label style={{ display: 'block', marginBottom: 12, fontSize: 14, color: '#f0a500', fontWeight: 600 }}>Body Composition (optional — can add later)</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#888' }}>Body Weight (lbs)</label>
+                  <input type="number" step="0.1" placeholder="lbs" value={bodyWeight} onChange={(e) => setBodyWeight(e.target.value)} onWheel={preventScrollChange} style={iStyle} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#888' }}>Body Fat %</label>
+                  <input type="number" step="0.1" placeholder="%" value={bodyFatPct} onChange={(e) => setBodyFatPct(e.target.value)} onWheel={preventScrollChange} style={iStyle} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#888' }}>Lean Muscle Mass (lbs)</label>
+                  <input type="number" step="0.1" placeholder="lbs" value={leanMuscleMass} onChange={(e) => setLeanMuscleMass(e.target.value)} onWheel={preventScrollChange} style={iStyle} />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <button type="submit" style={{ padding: '12px 32px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>{editingId ? 'Save Changes' : 'Add Athlete'}</button>
+            <button type="submit" style={{ padding: '12px 32px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>{editingId ? 'Save Changes' : type === 'adult' ? 'Add Adult' : 'Add Athlete'}</button>
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); resetForm(); }} style={{ padding: '12px 32px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
           </div>
         </form>
@@ -638,11 +833,15 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
           const ar = results.filter(r => r.athlete_id === athlete.id);
           const prs = ar.filter(r => r.is_pr).length;
           const age = calculateAge(athlete.birthday);
+          const isAdult = athlete.type === 'adult';
           return (
-            <div key={athlete.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div key={athlete.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: isAdult ? '1px solid rgba(240,165,0,0.2)' : '1px solid rgba(255,255,255,0.1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: 18 }}>{athlete.first_name} {athlete.last_name}</h3>
+                  <h3 style={{ margin: 0, fontSize: 18 }}>
+                    {athlete.first_name} {athlete.last_name}
+                    {isAdult && <span style={{ fontSize: 11, color: '#f0a500', marginLeft: 8, fontWeight: 600, verticalAlign: 'middle' }}>ADULT</span>}
+                  </h3>
                   <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 14 }}>
                     {age && (age + ' yrs')}
                     {athlete.gender && (' • ' + athlete.gender)}
@@ -655,7 +854,15 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
                   <span style={{ padding: '4px 10px', background: athlete.status === 'Active' ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.1)', color: athlete.status === 'Active' ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{athlete.status}</span>
                 </div>
               </div>
-              <div style={{ marginTop: 16, display: 'flex', gap: 24 }}>
+              {/* Body comp stats for adults */}
+              {isAdult && (athlete.body_weight || athlete.body_fat_pct || athlete.lean_muscle_mass) && (
+                <div style={{ marginTop: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {athlete.body_weight && <div><div style={{ fontSize: 16, fontWeight: 700, color: '#f0a500' }}>{athlete.body_weight}</div><div style={{ fontSize: 11, color: '#888' }}>lbs</div></div>}
+                  {athlete.body_fat_pct && <div><div style={{ fontSize: 16, fontWeight: 700, color: '#f0a500' }}>{athlete.body_fat_pct}%</div><div style={{ fontSize: 11, color: '#888' }}>Body Fat</div></div>}
+                  {athlete.lean_muscle_mass && <div><div style={{ fontSize: 16, fontWeight: 700, color: '#f0a500' }}>{athlete.lean_muscle_mass}</div><div style={{ fontSize: 11, color: '#888' }}>Lean Mass</div></div>}
+                </div>
+              )}
+              <div style={{ marginTop: isAdult ? 8 : 16, display: 'flex', gap: 24 }}>
                 <div><div style={{ fontSize: 24, fontWeight: 700, color: '#00d4ff' }}>{ar.length}</div><div style={{ fontSize: 12, color: '#888' }}>Tests</div></div>
                 <div><div style={{ fontSize: 24, fontWeight: 700, color: '#00ff88' }}>{prs}</div><div style={{ fontSize: 12, color: '#888' }}>PRs</div></div>
               </div>
@@ -691,8 +898,9 @@ function SimpleChart({ data, direction, testId }) {
   const points = data.map((d, i) => ({ x: data.length === 1 ? width/2 : i * pointSpacing, y: getY(d.value), ...d }));
   const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y).join(' ');
   const bestValue = direction === 'lower' ? minVal : maxVal;
+  const isRowTime = testId === '500m_row';
   const useFtIn = isFeetInchesTest(testId);
-  const formatVal = (v) => useFtIn ? formatFeetInches(v) : v;
+  const formatVal = (v) => useFtIn ? formatFeetInches(v) : (isRowTime ? formatRowTime(v) : v);
 
   return (
     <div style={{ padding: '20px 0' }}>
@@ -703,7 +911,7 @@ function SimpleChart({ data, direction, testId }) {
           return (
             <g key={i}>
               <line x1={0} y1={y} x2={width} y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-              <text x={-8} y={y + 4} fill="#888" fontSize="9" textAnchor="end">{useFtIn ? formatFeetInches(val) : (Number.isInteger(val) ? val : val.toFixed(1))}</text>
+              <text x={-8} y={y + 4} fill="#888" fontSize="9" textAnchor="end">{isRowTime ? formatRowTime(val) : (useFtIn ? formatFeetInches(val) : (Number.isInteger(val) ? val : val.toFixed(1)))}</text>
             </g>
           );
         })}
@@ -727,45 +935,68 @@ function DashboardPage({ athletes, results, getPR }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [selectedTest, setSelectedTest] = useState('');
   const athlete = athletes.find(a => a.id === selectedAthlete);
+  const athleteType = athlete ? (athlete.type || 'athlete') : 'athlete';
+  const testsForType = getTestsForType(athleteType);
   const test = selectedTest ? getTestById(selectedTest) : null;
   const athleteResults = selectedAthlete ? results.filter(r => r.athlete_id === selectedAthlete) : [];
   const testResults = selectedTest && selectedAthlete ? athleteResults.filter(r => r.test_id === selectedTest).sort((a,b) => new Date(a.test_date) - new Date(b.test_date)).map(r => ({ date: new Date(r.test_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}), value: parseFloat(r.converted_value), isPR: r.is_pr })) : [];
   const currentPR = selectedAthlete && selectedTest ? getPR(selectedAthlete, selectedTest) : null;
   const iStyle = { width: '100%', padding: '14px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
+  const formatDashValue = (testId, value) => {
+    if (isFeetInchesTest(testId)) return formatFeetInches(value);
+    if (testId === '500m_row') return formatRowTime(value);
+    return value;
+  };
+
   return (
     <div>
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Dashboard</h1>
-      <p style={{ color: '#888', marginBottom: 32 }}>View individual athlete performance and progress</p>
+      <p style={{ color: '#888', marginBottom: 32 }}>View individual performance and progress</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 32 }}>
         <div>
-          <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Athlete</label>
-          <AthleteSearchPicker athletes={athletes} value={selectedAthlete} onChange={(id) => { setSelectedAthlete(id); setSelectedTest(''); }} placeholder="Search athlete..." />
+          <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Athlete / Client</label>
+          <AthleteSearchPicker athletes={athletes} value={selectedAthlete} onChange={(id) => { setSelectedAthlete(id); setSelectedTest(''); }} placeholder="Search..." />
         </div>
         {selectedAthlete && (
           <div>
             <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Test for Graph</label>
             <select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={iStyle}>
               <option value="">Choose a test...</option>
-              {Object.entries(TESTS).map(([k,c]) => (<optgroup key={k} label={c.label}>{c.tests.map(t => (<option key={t.id} value={t.id}>{t.name}</option>))}</optgroup>))}
+              {Object.entries(testsForType).map(([k,c]) => (<optgroup key={k} label={c.label}>{c.tests.map(t => (<option key={t.id} value={t.id}>{t.name}</option>))}</optgroup>))}
             </select>
           </div>
         )}
       </div>
+
+      {/* Body comp summary for adults */}
+      {athlete && athleteType === 'adult' && (athlete.body_weight || athlete.body_fat_pct || athlete.lean_muscle_mass) && (
+        <div style={{ background: 'rgba(240,165,0,0.08)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(240,165,0,0.2)' }}>
+          <h3 style={{ margin: '0 0 16px 0', color: '#f0a500', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Body Composition</h3>
+          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+            {athlete.body_weight && <div><div style={{ fontSize: 28, fontWeight: 700, color: '#f0a500' }}>{athlete.body_weight}</div><div style={{ fontSize: 13, color: '#888' }}>Weight (lbs)</div></div>}
+            {athlete.body_fat_pct && <div><div style={{ fontSize: 28, fontWeight: 700, color: '#f0a500' }}>{athlete.body_fat_pct}%</div><div style={{ fontSize: 13, color: '#888' }}>Body Fat</div></div>}
+            {athlete.lean_muscle_mass && <div><div style={{ fontSize: 28, fontWeight: 700, color: '#f0a500' }}>{athlete.lean_muscle_mass}</div><div style={{ fontSize: 13, color: '#888' }}>Lean Mass (lbs)</div></div>}
+          </div>
+        </div>
+      )}
+
       {athlete && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
-          <h2 style={{ margin: '0 0 20px 0', fontSize: 20 }}>{athlete.first_name} {athlete.last_name}'s Personal Records</h2>
+          <h2 style={{ margin: '0 0 20px 0', fontSize: 20 }}>
+            {athlete.first_name} {athlete.last_name}'s Personal Records
+            {athleteType === 'adult' && <span style={{ fontSize: 13, color: '#f0a500', marginLeft: 10 }}>ADULT</span>}
+          </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
-            {Object.entries(TESTS).map(([k,c]) => (
+            {Object.entries(testsForType).map(([k,c]) => (
               <div key={k}>
                 <h4 style={{ color: '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{c.label}</h4>
                 {c.tests.map(t => {
                   const pr = getPR(athlete.id, t.id);
-                  const useFtIn = isFeetInchesTest(t.id);
                   return (
                     <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14 }}>
                       <span style={{ color: '#aaa' }}>{t.name}</span>
-                      <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? (useFtIn ? formatFeetInches(pr) : (pr + ' ' + (t.displayUnit||t.unit))) : '-'}</span>
+                      <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? (formatDashValue(t.id, pr) + (t.id !== '500m_row' && !isFeetInchesTest(t.id) ? (' ' + (t.displayUnit||t.unit)) : '')) : '-'}</span>
                     </div>
                   );
                 })}
@@ -778,7 +1009,7 @@ function DashboardPage({ athletes, results, getPR }) {
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
             <h2 style={{ margin: 0, fontSize: 20 }}>{test ? test.name : ''} Progress</h2>
-            {currentPR && <div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{'🏆 PR: ' + (isFeetInchesTest(selectedTest) ? formatFeetInches(currentPR) : (currentPR + ' ' + (test ? (test.displayUnit||test.unit) : '')))}</div>}
+            {currentPR && <div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{'🏆 PR: ' + formatDashValue(selectedTest, currentPR) + (selectedTest !== '500m_row' && !isFeetInchesTest(selectedTest) ? (' ' + (test ? (test.displayUnit||test.unit) : '')) : '')}</div>}
           </div>
           <SimpleChart data={testResults} direction={test ? test.direction : 'higher'} testId={selectedTest} />
           <div style={{ marginTop: 16, fontSize: 13, color: '#888' }}>
@@ -788,7 +1019,7 @@ function DashboardPage({ athletes, results, getPR }) {
           </div>
         </div>
       )}
-      {!selectedAthlete && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Select an athlete above to view their dashboard.</p></div>}
+      {!selectedAthlete && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Select an athlete or client above to view their dashboard.</p></div>}
     </div>
   );
 }
@@ -810,6 +1041,13 @@ function RecentPRsPage({ athletes, results, getAthleteById }) {
     .sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
   const timeLabels = { week: '1 Week', month: '1 Month', quarter: '3 Months' };
+
+  const formatPRValue = (testId, value) => {
+    if (isFeetInchesTest(testId)) return formatFeetInches(parseFloat(value));
+    if (testId === '500m_row') return formatRowTime(parseFloat(value));
+    return Math.round(parseFloat(value));
+  };
+
   return (
     <div>
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>🔥 Recent PRs</h1>
@@ -844,16 +1082,21 @@ function RecentPRsPage({ athletes, results, getAthleteById }) {
             const a = getAthleteById(r.athlete_id);
             const t = getTestById(r.test_id);
             const age = a ? calculateAge(a.birthday) : null;
+            const isAdult = a && a.type === 'adult';
             const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            const useFtIn = isFeetInchesTest(r.test_id);
             return (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}>
                 <div style={{ fontSize: 24 }}>🏆</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 16 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}</div>
+                  <div style={{ fontWeight: 600, fontSize: 16 }}>
+                    {a ? `${a.first_name} ${a.last_name}` : 'Unknown'}
+                    {isAdult && <span style={{ fontSize: 11, color: '#f0a500', marginLeft: 8 }}>ADULT</span>}
+                  </div>
                   <div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs • `}{t?.name} • {dateStr}</div>
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : Math.round(r.converted_value)} <span style={{ fontSize: 13, fontWeight: 500, color: '#888' }}>{!useFtIn && (t?.displayUnit || t?.unit)}</span></div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>
+                  {formatPRValue(r.test_id, r.converted_value)} <span style={{ fontSize: 13, fontWeight: 500, color: '#888' }}>{r.test_id !== '500m_row' && !isFeetInchesTest(r.test_id) && (t?.displayUnit || t?.unit)}</span>
+                </div>
               </div>
             );
           })}
@@ -879,14 +1122,26 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
   const sortedResults = [...filteredResults].sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
   const handleEdit = (r) => { setEditingResult(r.id); setEditDate(String(r.test_date).slice(0, 10)); setEditValue(String(r.raw_value)); };
   const handleSaveEdit = (r) => { updateResult(r.id, { testId: r.test_id, testDate: editDate, rawValue: parseFloat(editValue) }); setEditingResult(null); };
+
+  const selectedAthleteObj = athletes.find(a => a.id === parseInt(selectedAthlete));
+  const selectedType = selectedAthleteObj ? (selectedAthleteObj.type || 'athlete') : 'athlete';
+  const testsForManage = selectedAthlete ? getTestsForType(selectedType) : TESTS;
+
   const iStyle = { width: '100%', padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
+
+  const formatManageValue = (testId, value) => {
+    if (isFeetInchesTest(testId)) return formatFeetInches(parseFloat(value));
+    if (testId === '500m_row') return formatRowTime(parseFloat(value));
+    return value;
+  };
+
   return (
     <div>
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>⚙️ Manage</h1>
       <p style={{ color: '#888', marginBottom: 32 }}>Edit or delete test results</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 32 }}>
-        <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Athlete</label><select value={selectedAthlete} onChange={(e) => { setSelectedAthlete(e.target.value); setSelectedTest(''); }} style={iStyle}><option value="">Choose an athlete...</option>{athletes.map(a => (<option key={a.id} value={a.id}>{a.first_name} {a.last_name}</option>))}</select></div>
-        {selectedAthlete && (<div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={iStyle}><option value="">All Tests</option>{Object.entries(TESTS).map(([k, c]) => (<optgroup key={k} label={c.label}>{c.tests.map(t => (<option key={t.id} value={t.id}>{t.name}</option>))}</optgroup>))}</select></div>)}
+        <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Athlete / Client</label><select value={selectedAthlete} onChange={(e) => { setSelectedAthlete(e.target.value); setSelectedTest(''); }} style={iStyle}><option value="">Choose...</option>{athletes.map(a => (<option key={a.id} value={a.id}>{a.first_name} {a.last_name}{a.type === 'adult' ? ' (Adult)' : ''}</option>))}</select></div>
+        {selectedAthlete && (<div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={iStyle}><option value="">All Tests</option>{Object.entries(testsForManage).map(([k, c]) => (<optgroup key={k} label={c.label}>{c.tests.map(t => (<option key={t.id} value={t.id}>{t.name}</option>))}</optgroup>))}</select></div>)}
       </div>
       {selectedAthlete && sortedResults.length > 0 && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
@@ -894,6 +1149,7 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
             const test = getTestById(r.test_id);
             const isEd = editingResult === r.id;
             const useFtIn = isFeetInchesTest(r.test_id);
+            const isRowTime = r.test_id === '500m_row';
             return (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 12, flexWrap: 'wrap' }}>
                 {isEd ? (
@@ -902,6 +1158,7 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
                     <span style={{ color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{test?.name || r.test_id}</span>
                     <input type="number" step="0.01" value={editValue} onChange={(e) => setEditValue(e.target.value)} onWheel={preventScrollChange} style={{ width: 100, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} />
                     {useFtIn && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatFeetInches(parseFloat(editValue))}</span>}
+                    {isRowTime && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatRowTime(parseFloat(editValue))}</span>}
                     <button onClick={() => handleSaveEdit(r)} style={{ padding: '6px 12px', background: 'rgba(0,255,136,0.3)', border: 'none', borderRadius: 4, color: '#00ff88', cursor: 'pointer', fontSize: 12 }}>Save</button>
                     <button onClick={() => setEditingResult(null)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
                   </>
@@ -909,7 +1166,9 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
                   <>
                     <div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                     <div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{test?.name || r.test_id}</div>
-                    <div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : r.converted_value} <span style={{ fontSize: 12, color: '#888' }}>{!useFtIn && (test?.displayUnit || test?.unit)}</span> {r.is_pr && '🏆'}</div>
+                    <div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>
+                      {formatManageValue(r.test_id, r.converted_value)} <span style={{ fontSize: 12, color: '#888' }}>{!useFtIn && !isRowTime && (test?.displayUnit || test?.unit)}</span> {r.is_pr && '🏆'}
+                    </div>
                     <button onClick={() => handleEdit(r)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button>
                     <button onClick={() => { if (window.confirm('Delete this result?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Delete</button>
                   </>
@@ -920,7 +1179,7 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
         </div>
       )}
       {selectedAthlete && sortedResults.length === 0 && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results found.</div>}
-      {!selectedAthlete && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Select an athlete to manage their results.</p></div>}
+      {!selectedAthlete && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Select an athlete or client to manage their results.</p></div>}
     </div>
   );
 }
@@ -942,6 +1201,8 @@ function JumpCalcPage({ athletes, setAthletes, results, logResults, getPR, showN
   const getTouchTotal = (row) => (row.touchFeet !== '' && row.touchInches !== '') ? parseInt(row.touchFeet) * 12 + parseFloat(row.touchInches) : null;
   const getJumpResult = (row) => { const r = getReachTotal(row); const t = getTouchTotal(row); return (r !== null && t !== null && t > r) ? parseFloat((t - r).toFixed(1)) : null; };
   const usedIds = rows.map(r => r.athleteId);
+  // Jump calc only for athletes (not adults)
+  const athleteOnly = athletes.filter(a => (a.type || 'athlete') === 'athlete');
   const saveAll = async () => {
     setSaving(true);
     const toSave = rows.filter(r => getJumpResult(r) !== null && !r.saved);
@@ -967,7 +1228,7 @@ function JumpCalcPage({ athletes, setAthletes, results, logResults, getPR, showN
       <p style={{ color: '#888', marginBottom: 24 }}>Calculate approach jumps for the whole class</p>
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'end' }}>
-          <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Add Athletes</label><AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => addRow(id)} excludeIds={usedIds} placeholder="Search & add athlete..." /></div>
+          <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Add Athletes</label><AthleteSearchPicker athletes={athleteOnly} value={null} onChange={(id) => addRow(id)} excludeIds={usedIds} placeholder="Search & add athlete..." /></div>
           <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Test Date</label><input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} style={{ width: '100%', ...iStyle }} /></div>
         </div>
         {rows.length > 0 && <div style={{ marginTop: 12, fontSize: 13, color: '#888' }}>{rows.length} athlete{rows.length !== 1 ? 's' : ''} added</div>}
@@ -1078,6 +1339,8 @@ function RecordBoardPage({ athletes, results }) {
         if (r.test_id !== test.id) return;
         const a = athleteMap[r.athlete_id];
         if (!a) return;
+        // Exclude adults from record board
+        if (a.type === 'adult') return;
         const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
         if (EXCLUDED.includes(fullName)) return;
         const g = (a.gender || '').toLowerCase();
@@ -1130,77 +1393,4 @@ function RecordBoardPage({ athletes, results }) {
     )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 4 }}>—</div>;
 
     return (
-      <div key={test.id} style={{ background: cardBg, borderRadius: 10, padding: isTv ? 10 : 12, border: cardBorder }}>
-        <div style={{ textAlign: 'center', fontSize: isTv ? 15 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: '2px solid #C8963E', letterSpacing: 1 }}>{test.name}</div>
-        <div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>15+</div>
-        {renderRows(hs)}
-        <div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>14 & UNDER</div>
-        {renderRows(ms)}
-      </div>
-    );
-  };
-
-  if (tvMode) {
-    return (
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 20, overflow: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '4px solid #C8963E' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
-          <div style={{ fontSize: 48, fontWeight: 700, letterSpacing: 4 }}>{gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS</div>
-          <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-            {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-            {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>🏆 Record Board</h1>
-          <p style={{ color: '#888' }}>Top 5 records across all athletes — put this on your gym TV!</p>
-        </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={() => setGender(g => g === 'boys' ? 'girls' : 'boys')} style={{ padding: '10px 20px', background: 'rgba(0,212,255,0.15)', border: '2px solid #00d4ff', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit' }}>
-            {gender === 'boys' ? 'SWITCH TO GIRLS' : 'SWITCH TO BOYS'}
-          </button>
-          <button onClick={() => setAutoSwitch(a => !a)} style={{ padding: '10px 20px', background: autoSwitch ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)', border: `2px solid ${autoSwitch ? '#00ff88' : '#666'}`, borderRadius: 6, color: autoSwitch ? '#00ff88' : '#888', cursor: 'pointer', fontWeight: 600, fontSize: 14, fontFamily: 'inherit' }}>
-            {autoSwitch ? '⏸ PAUSE' : '▶ AUTO (60s)'}
-          </button>
-          <button onClick={() => { setAutoSwitch(true); setTvMode(true); }} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #C8963E 0%, #A87A2E 100%)', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14, fontFamily: 'inherit', letterSpacing: 1 }}>
-            📺 TV MODE
-          </button>
-        </div>
-      </div>
-
-      <div style={{ fontSize: 36, fontWeight: 700, textAlign: 'center', marginBottom: 24, letterSpacing: 4 }}>
-        {gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS
-      </div>
-
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Speed & Power</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, false))}
-        </div>
-      </div>
-
-      <div>
-        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Strength</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, false))}
-        </div>
-      </div>
-    </div>
-  );
-}
+      <div key={test.id} style={{ background:
