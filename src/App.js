@@ -26,7 +26,6 @@ const formatTestValue = (testId, value) => {
 
 const preventScrollChange = (e) => { e.target.blur(); };
 
-// ---- ATHLETE TESTS (full list) ----
 const TESTS = {
   speed: { label: 'Speed & Acceleration', tests: [
     { id: 'max_velocity', name: 'Max Velocity', unit: 'split sec', direction: 'higher', convert: (v) => (20.45 / v).toFixed(2), displayUnit: 'MPH' },
@@ -66,7 +65,6 @@ const TESTS = {
   ]}
 };
 
-// ---- ADULT-SPECIFIC TESTS ----
 const ADULT_TESTS = {
   performance: { label: 'Performance', tests: [
     { id: '5_0_5', name: '5-0-5', unit: 'sec', direction: 'lower' },
@@ -96,7 +94,6 @@ const ADULT_TESTS = {
   ]}
 };
 
-// Merge all tests for lookup
 const ALL_TEST_DEFS = {};
 Object.values(TESTS).forEach(c => c.tests.forEach(t => { ALL_TEST_DEFS[t.id] = t; }));
 Object.values(ADULT_TESTS).forEach(c => c.tests.forEach(t => { if (!ALL_TEST_DEFS[t.id]) ALL_TEST_DEFS[t.id] = t; }));
@@ -213,7 +210,7 @@ function FeetInchesInput({ value, onChange, style = {} }) {
   );
 }
 
-/* ===================== ROW TIME INPUT (M:SS.s) ===================== */
+/* ===================== ROW TIME INPUT ===================== */
 function RowTimeInput({ value, onChange }) {
   const [minutes, setMinutes] = useState('');
   const [seconds, setSeconds] = useState('');
@@ -377,6 +374,7 @@ export default function App() {
     { id: 'jumpcalc', label: '📏 Jump Calc' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'adultclients', label: '👤 Adult Clients' },
+    { id: 'adultrecordboard', label: '🥇 Adult Records' },
   ];
 
   return (
@@ -414,6 +412,7 @@ export default function App() {
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} />}
         {page === 'adultclients' && <AdultClientsPage athletes={athletes} results={results} getPR={getPR} logResults={logResults} getAthleteById={getAthleteById} />}
+        {page === 'adultrecordboard' && <AdultRecordBoardPage athletes={athletes} results={results} />}
       </main>
 
       <style>{`
@@ -1220,7 +1219,6 @@ function RecordBoardPage({ athletes, results }) {
     { id: 'front_squat', name: 'Front Squat', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'bench_press', name: 'Bench', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'deadlift', name: 'Deadlift', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
-    // Overhead pulls best across press, push_press, jerk, and legacy 'overhead'
     { id: '_overhead_rollup', name: 'Overhead', unit: 'lbs', direction: 'higher', format: v => Math.round(v) },
     { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher', format: v => Math.round(v) },
   ];
@@ -1236,7 +1234,6 @@ function RecordBoardPage({ athletes, results }) {
     return age;
   };
 
-  // For overhead rollup: get best value for an athlete across all overhead test_ids
   const getOverheadBestForAthlete = (athleteId) => {
     const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
     const vals = results
@@ -1255,7 +1252,6 @@ function RecordBoardPage({ athletes, results }) {
       records[test.id] = { hs: [], ms: [] };
 
       if (test.id === '_overhead_rollup') {
-        // Special rollup: get best overhead per athlete
         athletes.forEach(a => {
           if (a.type === 'adult') return;
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
@@ -1265,7 +1261,6 @@ function RecordBoardPage({ athletes, results }) {
           if (!isMatch) return;
           const best = getOverheadBestForAthlete(a.id);
           if (best === null) return;
-          // For age classification, use oldest result date among overhead tests
           const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
           const overheadResults = results.filter(r => r.athlete_id === a.id && overheadIds.includes(r.test_id));
           const firstDate = overheadResults.length > 0 ? overheadResults.sort((x, y) => new Date(x.test_date) - new Date(y.test_date))[0].test_date : null;
@@ -1567,6 +1562,129 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/* ===================== ADULT RECORD BOARD ===================== */
+function AdultRecordBoardPage({ athletes, results }) {
+  const [gender, setGender] = useState('men');
+
+  const gold   = '#C8963E';
+  const silver = '#A0A0B0';
+  const bronze = '#A0622A';
+  const rankColors = [gold, silver, bronze, '#888', '#666'];
+  const rankLabels = ['1st', '2nd', '3rd', '4th', '5th'];
+
+  const ADULT_BOARD_TESTS = [
+    { id: 'clean',         name: 'Clean',       direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'snatch',        name: 'Snatch',       direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'front_squat',   name: 'Front Squat',  direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'back_squat',    name: 'Back Squat',   direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'bench_press',   name: 'Bench Press',  direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'deadlift',      name: 'Deadlift',     direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: '_overhead',     name: 'Overhead',     direction: 'higher', format: v => Math.round(v) + ' lbs', rollupIds: ['press','push_press','jerk','overhead'] },
+    { id: 'chin_up',       name: 'Chin-Up',      direction: 'higher', format: v => Math.round(v) + ' reps' },
+    { id: '500m_row',      name: '500m Row',     direction: 'lower',  format: v => formatRowTime(v) },
+  ];
+
+  const buildRecords = (test) => {
+    const adultAthletes = athletes.filter(a => a.type === 'adult');
+    const entries = [];
+
+    adultAthletes.forEach(a => {
+      const g = (a.gender || '').toLowerCase();
+      const matches = gender === 'men' ? g !== 'female' : g === 'female';
+      if (!matches) return;
+
+      let best = null;
+      if (test.rollupIds) {
+        const vals = results
+          .filter(r => r.athlete_id === a.id && test.rollupIds.includes(r.test_id))
+          .map(r => parseFloat(r.converted_value))
+          .filter(v => !isNaN(v));
+        if (vals.length > 0) best = Math.max(...vals);
+      } else {
+        const vals = results
+          .filter(r => r.athlete_id === a.id && r.test_id === test.id)
+          .map(r => parseFloat(r.converted_value))
+          .filter(v => !isNaN(v));
+        if (vals.length > 0) best = test.direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
+      }
+
+      if (best !== null) {
+        entries.push({ name: `${a.first_name} ${(a.last_name || '').charAt(0)}.`, value: best });
+      }
+    });
+
+    entries.sort((a, b) => test.direction === 'higher' ? b.value - a.value : a.value - b.value);
+    const seen = new Set();
+    return entries.filter(e => {
+      if (seen.has(e.name)) return false;
+      seen.add(e.name);
+      return true;
+    }).slice(0, 5);
+  };
+
+  const renderCard = (test) => {
+    const records = buildRecords(test);
+    return (
+      <div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(200,150,62,0.2)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ textAlign: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 15, letterSpacing: 1.5, textTransform: 'uppercase', color: '#e8e8e8', paddingBottom: 12, marginBottom: 12, borderBottom: `2px solid ${gold}` }}>
+          {test.name}
+        </div>
+        {records.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#444', fontSize: 13, padding: '12px 0' }}>No data yet</div>
+        ) : (
+          records.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 6px', borderRadius: 6, marginBottom: 2, background: i === 0 ? 'rgba(200,150,62,0.12)' : 'transparent' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: rankColors[i], width: 28, textAlign: 'center', letterSpacing: 0.5 }}>
+                {rankLabels[i]}
+              </span>
+              <span style={{ flex: 1, fontSize: 13, color: i === 0 ? '#e8e8e8' : '#aaa', fontWeight: i === 0 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.name}
+              </span>
+              <span style={{ fontSize: i === 0 ? 16 : 14, fontWeight: 800, color: rankColors[i], whiteSpace: 'nowrap' }}>
+                {test.format(r.value)}
+              </span>
+            </div>
+          ))
+        )}
+        {records.length > 0 && records.length < 5 && Array.from({ length: 5 - records.length }).map((_, i) => (
+          <div key={'empty-' + i} style={{ padding: '8px 6px', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#2a2a2a' }}>{rankLabels[records.length + i]}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const menCount   = athletes.filter(a => a.type === 'adult' && (a.gender || '').toLowerCase() !== 'female').length;
+  const womenCount = athletes.filter(a => a.type === 'adult' && (a.gender || '').toLowerCase() === 'female').length;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Adult Record Board</h1>
+          <p style={{ color: '#888' }}>{menCount} men · {womenCount} women</p>
+        </div>
+        <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(200,150,62,0.3)' }}>
+          {['men', 'women'].map(g => (
+            <button key={g} onClick={() => setGender(g)} style={{ padding: '12px 32px', background: gender === g ? 'linear-gradient(135deg, #C8963E 0%, #A87A2E 100%)' : 'rgba(255,255,255,0.03)', border: 'none', color: gender === g ? '#fff' : '#888', fontWeight: gender === g ? 700 : 400, fontSize: 15, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 1, fontFamily: "'Archivo Black', sans-serif" }}>
+              {g}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 13, color: gold, textTransform: 'uppercase', letterSpacing: 3, borderLeft: `4px solid ${gold}`, paddingLeft: 12, marginBottom: 20 }}>
+        {gender === 'men' ? 'Men' : 'Women'} · Top 5 All-Time
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+        {ADULT_BOARD_TESTS.map(test => renderCard(test))}
+      </div>
     </div>
   );
 }
