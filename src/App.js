@@ -373,8 +373,6 @@ export default function App() {
     { id: 'manage', label: '⚙️ Manage' },
     { id: 'jumpcalc', label: '📏 Jump Calc' },
     { id: 'recordboard', label: '🏆 Record Board' },
-    { id: 'adultclients', label: '👤 Adult Clients' },
-    { id: 'adultrecordboard', label: '🥇 Adult Records' },
   ];
 
   return (
@@ -411,8 +409,6 @@ export default function App() {
         {page === 'manage' && <ManagePage athletes={athletes} results={results} getAthleteById={getAthleteById} deleteResult={deleteResult} updateResult={updateResult} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} />}
-        {page === 'adultclients' && <AdultClientsPage athletes={athletes} results={results} getPR={getPR} logResults={logResults} getAthleteById={getAthleteById} />}
-        {page === 'adultrecordboard' && <AdultRecordBoardPage athletes={athletes} results={results} />}
       </main>
 
       <style>{`
@@ -1199,7 +1195,7 @@ function JumpCalcPage({ athletes, setAthletes, results, logResults, getPR, showN
 
 /* ===================== RECORD BOARD ===================== */
 function RecordBoardPage({ athletes, results }) {
-  const [gender, setGender] = useState('boys');
+  const [section, setSection] = useState('boys');
   const [autoSwitch, setAutoSwitch] = useState(false);
   const [tvMode, setTvMode] = useState(false);
 
@@ -1223,6 +1219,18 @@ function RecordBoardPage({ athletes, results }) {
     { id: 'chin_up', name: 'Chin-Up', unit: 'reps', direction: 'higher', format: v => Math.round(v) },
   ];
 
+  const ADULT_BOARD_TESTS = [
+    { id: 'clean',       name: 'Clean',       direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'snatch',      name: 'Snatch',      direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'front_squat', name: 'Front Squat', direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'back_squat',  name: 'Back Squat',  direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'bench_press', name: 'Bench Press', direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: 'deadlift',    name: 'Deadlift',    direction: 'higher', format: v => Math.round(v) + ' lbs' },
+    { id: '_overhead',   name: 'Overhead',    direction: 'higher', format: v => Math.round(v) + ' lbs', rollupIds: ['press','push_press','jerk','overhead'] },
+    { id: 'chin_up',     name: 'Chin-Up',     direction: 'higher', format: v => Math.round(v) + ' reps' },
+    { id: '500m_row',    name: '500m Row',    direction: 'lower',  format: v => formatRowTime(v) },
+  ];
+
   const EXCLUDED = ['matt secrest'];
 
   const getAgeAtTest = (birthday, testDate) => {
@@ -1243,7 +1251,7 @@ function RecordBoardPage({ athletes, results }) {
     return vals.length > 0 ? Math.max(...vals) : null;
   };
 
-  const buildRecords = (tests) => {
+  const buildRecords = (tests, genderFilter) => {
     const athleteMap = {};
     athletes.forEach(a => { athleteMap[a.id] = a; });
     const records = {};
@@ -1257,7 +1265,7 @@ function RecordBoardPage({ athletes, results }) {
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
           if (EXCLUDED.includes(fullName)) return;
           const g = (a.gender || '').toLowerCase();
-          const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
+          const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
           if (!isMatch) return;
           const best = getOverheadBestForAthlete(a.id);
           if (best === null) return;
@@ -1278,7 +1286,7 @@ function RecordBoardPage({ athletes, results }) {
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
           if (EXCLUDED.includes(fullName)) return;
           const g = (a.gender || '').toLowerCase();
-          const isMatch = gender === 'boys' ? g !== 'female' : g === 'female';
+          const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
           if (!isMatch) return;
           const val = parseFloat(r.converted_value || r.raw_value);
           if (isNaN(val)) return;
@@ -1303,12 +1311,35 @@ function RecordBoardPage({ athletes, results }) {
     return records;
   };
 
-  const speedRecords = buildRecords(BOARD_SPEED);
-  const strengthRecords = buildRecords(BOARD_STRENGTH);
+  const speedRecords = buildRecords(BOARD_SPEED, section);
+  const strengthRecords = buildRecords(BOARD_STRENGTH, section);
 
+  const buildAdultRecords = (test, genderFilter) => {
+    const adultAthletes = athletes.filter(a => a.type === 'adult');
+    const entries = [];
+    adultAthletes.forEach(a => {
+      const g = (a.gender || '').toLowerCase();
+      const matches = genderFilter === 'men' ? g !== 'female' : g === 'female';
+      if (!matches) return;
+      let best = null;
+      if (test.rollupIds) {
+        const vals = results.filter(r => r.athlete_id === a.id && test.rollupIds.includes(r.test_id)).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
+        if (vals.length > 0) best = Math.max(...vals);
+      } else {
+        const vals = results.filter(r => r.athlete_id === a.id && r.test_id === test.id).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
+        if (vals.length > 0) best = test.direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
+      }
+      if (best !== null) entries.push({ name: `${a.first_name} ${(a.last_name || '').charAt(0)}.`, value: best });
+    });
+    entries.sort((a, b) => test.direction === 'higher' ? b.value - a.value : a.value - b.value);
+    const seen = new Set();
+    return entries.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; }).slice(0, 5);
+  };
+
+  const SECTIONS = ['boys', 'girls', 'adults'];
   useEffect(() => {
     if (!autoSwitch) return;
-    const interval = setInterval(() => setGender(g => g === 'boys' ? 'girls' : 'boys'), 60000);
+    const interval = setInterval(() => setSection(s => { const i = SECTIONS.indexOf(s); return SECTIONS[(i + 1) % SECTIONS.length]; }), 60000);
     return () => clearInterval(interval);
   }, [autoSwitch]);
 
@@ -1334,26 +1365,60 @@ function RecordBoardPage({ athletes, results }) {
     );
   };
 
+  const gold = '#C8963E';
+  const rankColors = [gold, '#A0A0B0', '#A0622A', '#888', '#666'];
+  const rankLabels = ['1st', '2nd', '3rd', '4th', '5th'];
+
+  const renderAdultCard = (test, isTv) => {
+    const men = buildAdultRecords(test, 'men');
+    const women = buildAdultRecords(test, 'women');
+    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (
+      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', margin: '2px 0', borderRadius: 4, background: i === 0 ? 'rgba(200,150,62,0.12)' : 'transparent' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: rankColors[i], width: 24, textAlign: 'center' }}>{rankLabels[i]}</span>
+        <span style={{ flex: 1, fontSize: isTv ? 12 : 13, color: i === 0 ? '#e8e8e8' : '#aaa', fontWeight: i === 0 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+        <span style={{ fontSize: isTv ? 12 : 13, fontWeight: 700, color: rankColors[i], whiteSpace: 'nowrap' }}>{test.format(r.value)}</span>
+      </div>
+    )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 12, padding: '4px 0' }}>—</div>;
+
+    return (
+      <div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(200,150,62,0.2)' }}>
+        <div style={{ textAlign: 'center', fontSize: isTv ? 13 : 15, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: `2px solid ${gold}`, letterSpacing: 1, textTransform: 'uppercase' }}>{test.name}</div>
+        <div style={{ fontSize: 10, color: '#FFA500', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>MEN</div>
+        {renderRows(men)}
+        <div style={{ fontSize: 10, color: '#FFA500', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>WOMEN</div>
+        {renderRows(women)}
+      </div>
+    );
+  };
+
+  const sectionLabels = { boys: 'BOYS RECORDS', girls: 'GIRLS RECORDS', adults: 'ADULT RECORDS' };
+  const sectionColors = { boys: '#00d4ff', girls: '#ff6ec7', adults: '#C8963E' };
+
   if (tvMode) {
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 20, overflow: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '4px solid #C8963E' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: `4px solid ${sectionColors[section]}` }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
-          <div style={{ fontSize: 48, fontWeight: 700, letterSpacing: 4 }}>{gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS</div>
+          <div style={{ fontSize: 48, fontWeight: 700, letterSpacing: 4, color: sectionColors[section] }}>{sectionLabels[section]}</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
         </div>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-            {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
+        {section !== 'adults' && (
+          <>
+            <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
+              {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
+            </div>
+            <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
+              {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
+            </div>
+          </>
+        )}
+        {section === 'adults' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 10 }}>
+            {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, true))}
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-            {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
-          </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -1363,14 +1428,11 @@ function RecordBoardPage({ athletes, results }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Record Board</h1>
-          <p style={{ color: '#888' }}>Top 5 records — youth athletes only</p>
+          <p style={{ color: '#888' }}>Top 5 all-time records</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={() => setGender(g => g === 'boys' ? 'girls' : 'boys')} style={{ padding: '10px 20px', background: 'rgba(0,212,255,0.15)', border: '2px solid #00d4ff', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
-            {gender === 'boys' ? 'Switch to Girls' : 'Switch to Boys'}
-          </button>
           <button onClick={() => setAutoSwitch(a => !a)} style={{ padding: '10px 20px', background: autoSwitch ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)', border: `2px solid ${autoSwitch ? '#00ff88' : '#666'}`, borderRadius: 6, color: autoSwitch ? '#00ff88' : '#888', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
-            {autoSwitch ? 'Pause' : 'Auto (60s)'}
+            {autoSwitch ? 'Pause Auto' : 'Auto (60s)'}
           </button>
           <button onClick={() => { setAutoSwitch(true); setTvMode(true); }} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #C8963E 0%, #A87A2E 100%)', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>
             TV Mode
@@ -1378,22 +1440,44 @@ function RecordBoardPage({ athletes, results }) {
         </div>
       </div>
 
-      <div style={{ fontSize: 36, fontWeight: 700, textAlign: 'center', marginBottom: 24, letterSpacing: 4 }}>
-        {gender === 'boys' ? 'BOYS' : 'GIRLS'} RECORDS
+      <div style={{ display: 'flex', gap: 0, marginBottom: 28, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', width: 'fit-content' }}>
+        {[
+          { id: 'boys',   label: 'Boys',   color: '#00d4ff' },
+          { id: 'girls',  label: 'Girls',  color: '#ff6ec7' },
+          { id: 'adults', label: 'Adults', color: '#C8963E' },
+        ].map(s => (
+          <button key={s.id} onClick={() => setSection(s.id)} style={{ padding: '14px 36px', background: section === s.id ? 'rgba(255,255,255,0.08)' : 'transparent', border: 'none', borderBottom: section === s.id ? `3px solid ${s.color}` : '3px solid transparent', color: section === s.id ? s.color : '#666', fontWeight: section === s.id ? 700 : 400, cursor: 'pointer', fontSize: 16, fontFamily: "'Archivo Black', sans-serif", letterSpacing: 1, textTransform: 'uppercase', transition: 'all 0.15s' }}>
+            {s.label}
+          </button>
+        ))}
       </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Speed & Power</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, false))}
-        </div>
+      <div style={{ fontSize: 32, fontWeight: 700, marginBottom: 24, letterSpacing: 4, fontFamily: "'Archivo Black', sans-serif", color: sectionColors[section] }}>
+        {sectionLabels[section]}
       </div>
-      <div>
-        <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Strength</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, false))}
+
+      {section !== 'adults' && (
+        <>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 14, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Speed & Power</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+              {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, false))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12, textTransform: 'uppercase' }}>Strength</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+              {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, false))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {section === 'adults' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+          {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, false))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
