@@ -1396,12 +1396,13 @@ function RecordBoardPage({ athletes, results }) {
 
   if (tvMode) {
     return (
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 20, overflow: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: `4px solid ${sectionColors[section]}` }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
-          <div style={{ fontSize: 48, fontWeight: 700, letterSpacing: 4, color: sectionColors[section] }}>{sectionLabels[section]}</div>
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 12, overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: `4px solid ${sectionColors[section]}` }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
+          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: sectionColors[section] }}>{sectionLabels[section]}</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
         </div>
+<div style={{ flex: 1, overflow: 'hidden', transform: 'scale(0.78)', transformOrigin: 'top center' }}>
         {section !== 'adults' && (
           <>
             <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
@@ -1418,6 +1419,7 @@ function RecordBoardPage({ athletes, results }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 10 }}>
             {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, true))}
           </div>
+</div>
         )}
       </div>
     );
