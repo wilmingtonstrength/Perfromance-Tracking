@@ -1394,6 +1394,34 @@ function RecordBoardPage({ athletes, results }) {
   const sectionLabels = { boys: 'BOYS RECORDS', girls: 'GIRLS RECORDS', adults: 'ADULT RECORDS' };
   const sectionColors = { boys: '#00d4ff', girls: '#ff6ec7', adults: '#C8963E' };
 
+  const tvContentRef = useRef(null);
+  const tvContainerRef = useRef(null);
+  const [tvScale, setTvScale] = useState(1);
+
+  useEffect(() => {
+    if (!tvMode) return;
+    const recalc = () => {
+      const content = tvContentRef.current;
+      const container = tvContainerRef.current;
+      if (!content || !container) return;
+      // Temporarily reset scale to measure natural height
+      content.style.transform = 'scale(1)';
+      const naturalH = content.scrollHeight;
+      const availH = container.clientHeight;
+      const naturalW = content.scrollWidth;
+      const availW = container.clientWidth;
+      const scaleH = availH / naturalH;
+      const scaleW = availW / naturalW;
+      const scale = Math.min(scaleH, scaleW, 1);
+      setTvScale(scale);
+      content.style.transform = `scale(${scale})`;
+    };
+    // Recalc after render + on resize
+    const timer = setTimeout(recalc, 50);
+    window.addEventListener('resize', recalc);
+    return () => { clearTimeout(timer); window.removeEventListener('resize', recalc); };
+  }, [tvMode, section]);
+
   if (tvMode) {
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 12, overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -1402,24 +1430,26 @@ function RecordBoardPage({ athletes, results }) {
           <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: sectionColors[section] }}>{sectionLabels[section]}</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
         </div>
-        <div style={{ flex: 1, overflow: 'hidden', transform: 'scale(0.78)', transformOrigin: 'top center' }}>
-          {section !== 'adults' && (
-            <>
-              <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
-                {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
+        <div ref={tvContainerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          <div ref={tvContentRef} style={{ transformOrigin: 'top center', transform: `scale(${tvScale})`, width: '100%' }}>
+            {section !== 'adults' && (
+              <>
+                <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
+                  {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
+                </div>
+                <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
+                  {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
+                </div>
+              </>
+            )}
+            {section === 'adults' && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 10 }}>
+                {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, true))}
               </div>
-              <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-                {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
-              </div>
-            </>
-          )}
-          {section === 'adults' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 10 }}>
-              {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, true))}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
