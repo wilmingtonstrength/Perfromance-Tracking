@@ -1404,19 +1404,18 @@ function RecordBoardPage({ athletes, results }) {
       const content = tvContentRef.current;
       const container = tvContainerRef.current;
       if (!content || !container) return;
-      // Temporarily reset scale to measure natural height
-      content.style.transform = 'scale(1)';
+      // Reset to measure natural height at full container width
+      content.style.transform = 'none';
+      content.style.width = container.clientWidth + 'px';
       const naturalH = content.scrollHeight;
       const availH = container.clientHeight;
-      const naturalW = content.scrollWidth;
-      const availW = container.clientWidth;
-      const scaleH = availH / naturalH;
-      const scaleW = availW / naturalW;
-      const scale = Math.min(scaleH, scaleW, 1);
+      // Scale based on height only
+      const scale = Math.min(availH / naturalH, 1);
       setTvScale(scale);
+      // Stretch content width so after scaling it fills full container width
+      content.style.width = (container.clientWidth / scale) + 'px';
       content.style.transform = `scale(${scale})`;
     };
-    // Recalc after render + on resize
     const timer = setTimeout(recalc, 50);
     window.addEventListener('resize', recalc);
     return () => { clearTimeout(timer); window.removeEventListener('resize', recalc); };
@@ -1424,28 +1423,28 @@ function RecordBoardPage({ athletes, results }) {
 
   if (tvMode) {
     return (
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: 12, overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: `4px solid ${sectionColors[section]}` }}>
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: '8px 6px', overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 6, borderBottom: `4px solid ${sectionColors[section]}` }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#00d4ff', letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
           <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: sectionColors[section] }}>{sectionLabels[section]}</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
         </div>
         <div ref={tvContainerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-          <div ref={tvContentRef} style={{ transformOrigin: 'top center', transform: `scale(${tvScale})`, width: '100%' }}>
+          <div ref={tvContentRef} style={{ transformOrigin: 'top left', transform: `scale(${tvScale})` }}>
             {section !== 'adults' && (
               <>
-                <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
+                <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 10, marginBottom: 8 }}>SPEED & POWER</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8, marginBottom: 10 }}>
                   {BOARD_SPEED.map(t => renderTestCard(t, speedRecords, true))}
                 </div>
-                <div style={{ fontSize: 22, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
+                <div style={{ fontSize: 20, color: '#00d4ff', letterSpacing: 3, borderLeft: '4px solid #00d4ff', paddingLeft: 10, marginBottom: 8 }}>STRENGTH</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
                   {BOARD_STRENGTH.map(t => renderTestCard(t, strengthRecords, true))}
                 </div>
               </>
             )}
             {section === 'adults' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
                 {ADULT_BOARD_TESTS.map(t => renderAdultCard(t, true))}
               </div>
             )}
