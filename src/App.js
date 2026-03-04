@@ -119,6 +119,21 @@ const formatRowTime = (totalSeconds) => {
   return `${m}:${sec < 10 ? '0' : ''}${sec.toFixed(1)}`;
 };
 
+// Smart numeric formatter — preserves decimals based on test unit type
+const formatNumericResult = (testId, value) => {
+  if (value === null || value === undefined) return '-';
+  const v = parseFloat(value);
+  if (isNaN(v)) return '-';
+  const test = getTestById(testId);
+  if (!test) return String(v);
+  const unit = test.displayUnit || test.unit;
+  if (unit === 'sec' || unit === 'ratio') return v.toFixed(2);
+  if (unit === 'MPH') return v.toFixed(1);
+  if (unit === 'inches') return String(Math.round(v * 10) / 10);
+  if (unit === '%') return String(v);
+  return String(Math.round(v)); // lbs, reps
+};
+
 /* ===================== SEARCH PICKER ===================== */
 function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...', filterType = null }) {
   const [search, setSearch] = useState('');
@@ -512,7 +527,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
               <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 16 }}>{r.athlete} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>— {r.test}</span></span>
                 <span style={{ color: '#00ff88', fontWeight: 800, fontSize: 18 }}>
-                  {r.testId === '500m_row' ? formatRowTime(r.value) : isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : Math.round(r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
+                  {isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : r.testId === '500m_row' ? formatRowTime(r.value) : formatNumericResult(r.testId, r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
                 </span>
               </div>
             ))}
@@ -525,7 +540,7 @@ function TestEntryPage({ athletes, logResults, getPR, getAthleteById }) {
               <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between' }}>
                 <span><span style={{ fontWeight: 600 }}>{r.athlete}</span> — {r.test}</span>
                 <span style={{ color: '#00d4ff' }}>
-                  {r.testId === '500m_row' ? formatRowTime(r.value) : isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : Math.round(r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
+                  {isFeetInchesTest(r.testId) ? formatFeetInches(r.value) : r.testId === '500m_row' ? formatRowTime(r.value) : formatNumericResult(r.testId, r.value)} {!isFeetInchesTest(r.testId) && r.testId !== '500m_row' && r.unit}
                 </span>
               </div>
             ))}
@@ -848,7 +863,7 @@ function DashboardPage({ athletes, results, getPR }) {
     if (pr === null) return '-';
     if (isFeetInchesTest(t.id)) return formatFeetInches(pr);
     if (t.id === '500m_row') return formatRowTime(pr);
-    return pr + ' ' + (t.displayUnit || t.unit);
+    return formatNumericResult(t.id, pr) + ' ' + (t.displayUnit || t.unit);
   };
 
   return (
@@ -900,7 +915,7 @@ function DashboardPage({ athletes, results, getPR }) {
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
             <h2 style={{ margin: 0, fontSize: 20 }}>{test ? test.name : ''} Progress</h2>
-            {currentPR && <div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{'PR: ' + (isFeetInchesTest(selectedTest) ? formatFeetInches(currentPR) : selectedTest === '500m_row' ? formatRowTime(currentPR) : (currentPR + ' ' + (test ? (test.displayUnit || test.unit) : '')))}</div>}
+            {currentPR && <div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{'PR: ' + (isFeetInchesTest(selectedTest) ? formatFeetInches(currentPR) : selectedTest === '500m_row' ? formatRowTime(currentPR) : formatNumericResult(selectedTest, currentPR) + ' ' + (test ? (test.displayUnit || test.unit) : ''))}</div>}
           </div>
           <SimpleChart data={testResults} direction={test ? test.direction : 'higher'} testId={selectedTest} />
         </div>
@@ -982,7 +997,7 @@ function RecentPRsPage({ athletes, results, getAthleteById }) {
                   <div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div>
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>
-                  {isRowTest ? formatRowTime(parseFloat(r.converted_value)) : useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : Math.round(r.converted_value)}
+                  {isRowTest ? formatRowTime(parseFloat(r.converted_value)) : useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : formatNumericResult(r.test_id, r.converted_value)}
                   <span style={{ fontSize: 13, fontWeight: 500, color: '#888' }}> {!useFtIn && !isRowTest && (t?.displayUnit || t?.unit)}</span>
                 </div>
               </div>
@@ -1063,7 +1078,7 @@ function ManagePage({ athletes, results, getAthleteById, deleteResult, updateRes
                     <div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                     <div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{test?.name || r.test_id}</div>
                     <div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>
-                      {isRowTest ? formatRowTime(parseFloat(r.converted_value)) : useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : r.converted_value}
+                      {isRowTest ? formatRowTime(parseFloat(r.converted_value)) : useFtIn ? formatFeetInches(parseFloat(r.converted_value)) : formatNumericResult(r.test_id, r.converted_value)}
                       <span style={{ fontSize: 12, color: '#888' }}> {!useFtIn && !isRowTest && (test?.displayUnit || test?.unit)}</span>
                       {r.is_pr && ' 🏆'}
                     </div>
@@ -1536,7 +1551,7 @@ function AdultClientsPage({ athletes, results, getPR, logResults, getAthleteById
     if (isFeetInchesTest(t.id)) return formatFeetInches(v);
     if (t.id === '500m_row') return formatRowTime(v);
     if (t.id === 'body_fat_pct') return v + '%';
-    return v + ' ' + (t.displayUnit || t.unit);
+    return formatNumericResult(t.id, v) + ' ' + (t.displayUnit || t.unit);
   };
 
   const getMostRecent = (clientId, testId) => {
