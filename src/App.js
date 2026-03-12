@@ -101,6 +101,78 @@ Object.values(ADULT_TESTS).forEach(c => c.tests.forEach(t => { if (!ALL_TEST_DEF
 const getAllTests = () => Object.values(ALL_TEST_DEFS);
 const getTestById = (id) => ALL_TEST_DEFS[id] || null;
 
+/* ===================== ATHLETE SCORE (TSA) ===================== */
+// Z-score composite across 7 tests, scaled to 0–100 T-score (50 = avg, ±10 = ±1 SD)
+// Tests: vert, clean, back squat, 5-10 fly, max velocity (MPH), 5-0-5, RSI
+const TSA_TEST_DEFS = [
+  { id: 'vertical_jump', label: 'Vertical Jump',  direction: 'higher', unit: 'in' },
+  { id: 'clean',         label: 'Clean',           direction: 'higher', unit: 'lbs' },
+  { id: '_best_squat',   label: 'Best Squat',      direction: 'higher', unit: 'lbs', rollupIds: ['back_squat', 'front_squat'] },
+  { id: '5_10_fly',      label: '5-10 Fly',        direction: 'lower',  unit: 'sec' },
+  { id: 'max_velocity',  label: 'Max Velocity',    direction: 'higher', unit: 'MPH' }, // converted_value already MPH
+  { id: '5_0_5',         label: '5-0-5',           direction: 'lower',  unit: 'sec' },
+  { id: 'rsi',           label: 'RSI',             direction: 'higher', unit: '' },
+];
+
+const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
+  const youthAthletes = allAthletes.filter(a => (a.type || 'athlete') === 'athlete');
+
+  // Helper: get best value for an athlete across one or more test IDs (supports rollupIds)
+  const getBest = (aId, t) => {
+    const ids = t.rollupIds || [t.id];
+    const vals = allResults
+      .filter(r => r.athlete_id === aId && ids.includes(r.test_id))
+      .map(r => parseFloat(r.converted_value))
+      .filter(v => !isNaN(v));
+    if (vals.length === 0) return null;
+    return t.direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
+  };
+
+  // Build population mean/SD per test from all youth athletes
+  const popStats = {};
+  TSA_TEST_DEFS.forEach(t => {
+    const vals = [];
+    youthAthletes.forEach(a => {
+      const best = getBest(a.id, t);
+      if (best !== null) vals.push(best);
+    });
+    if (vals.length < 5) { popStats[t.id] = null; return; } // need at least 5 data points
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+    const sd   = Math.sqrt(vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / vals.length) || 1;
+    popStats[t.id] = { mean, sd, n: vals.length };
+  });
+
+  // Score the target athlete
+  const zScores = [];
+  const breakdown = [];
+  TSA_TEST_DEFS.forEach(t => {
+    if (!popStats[t.id]) return;
+    const best = getBest(athleteId, t);
+    if (best === null) return;
+    const { mean, sd } = popStats[t.id];
+    // For lower-is-better, flip sign so better performance = positive z
+    const z = t.direction === 'lower' ? (mean - best) / sd : (best - mean) / sd;
+    const tScore = Math.max(0, Math.min(100, Math.round(z * 10 + 50)));
+    zScores.push(z);
+    breakdown.push({ testId: t.id, label: t.label, unit: t.unit, z, tScore, best, n: popStats[t.id].n });
+  });
+
+  if (zScores.length === 0) return null;
+  const avgZ   = zScores.reduce((s, v) => s + v, 0) / zScores.length;
+  const overall = Math.max(0, Math.min(100, Math.round(avgZ * 10 + 50)));
+  return { score: overall, testsUsed: zScores.length, totalTests: TSA_TEST_DEFS.length, breakdown };
+};
+
+const scoreLabel = (score) => {
+  if (score >= 70) return { label: 'Elite',         color: '#ffd700' };
+  if (score >= 60) return { label: 'Above Average', color: '#00ff88' };
+  if (score >= 45) return { label: 'Average',       color: '#00d4ff' };
+  if (score >= 35) return { label: 'Below Average', color: '#FFA500' };
+  return                  { label: 'Developing',    color: '#ff6666' };
+};
+
+/* ===================== OTHER HELPERS ===================== */
+
 const calculateAge = (birthday) => {
   if (!birthday) return null;
   const today = new Date();
@@ -850,6 +922,7 @@ function SimpleChart({ data, direction, testId }) {
 function DashboardPage({ athletes, results, getPR }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [selectedTest, setSelectedTest] = useState('');
+  const [dashView, setDashView] = useState('prs'); // 'prs' | 'score'
   const athlete = athletes.find(a => a.id === selectedAthlete);
   const isAdult = athlete && athlete.type === 'adult';
   const testSet = isAdult ? ADULT_TESTS : TESTS;
@@ -858,6 +931,9 @@ function DashboardPage({ athletes, results, getPR }) {
   const testResults = selectedTest && selectedAthlete ? athleteResults.filter(r => r.test_id === selectedTest).sort((a, b) => new Date(a.test_date) - new Date(b.test_date)).map(r => ({ date: new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), value: parseFloat(r.converted_value), isPR: r.is_pr })) : [];
   const currentPR = selectedAthlete && selectedTest ? getPR(selectedAthlete, selectedTest) : null;
   const iStyle = { width: '100%', padding: '14px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
+
+  // Athlete Score
+  const athleteScore = (!isAdult && selectedAthlete) ? calculateAthleteScore(selectedAthlete, athletes, results) : null;
 
   const formatPRDisplay = (t, pr) => {
     if (pr === null) return '-';
@@ -873,7 +949,7 @@ function DashboardPage({ athletes, results, getPR }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 32 }}>
         <div>
           <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Athlete / Client</label>
-          <AthleteSearchPicker athletes={athletes} value={selectedAthlete} onChange={(id) => { setSelectedAthlete(id); setSelectedTest(''); }} placeholder="Search..." />
+          <AthleteSearchPicker athletes={athletes} value={selectedAthlete} onChange={(id) => { setSelectedAthlete(id); setSelectedTest(''); setDashView('prs'); }} placeholder="Search..." />
         </div>
         {selectedAthlete && (
           <div>
@@ -887,28 +963,117 @@ function DashboardPage({ athletes, results, getPR }) {
       </div>
 
       {athlete && (
-        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${isAdult ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{athlete.first_name} {athlete.last_name}'s Personal Records</h2>
-            {isAdult && <span style={{ fontSize: 12, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '3px 10px', borderRadius: 10, fontWeight: 600 }}>ADULT CLIENT</span>}
+        <>
+          {/* View toggle — PRs vs Athlete Score (youth only) */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+            <button onClick={() => setDashView('prs')} style={{ padding: '10px 24px', background: dashView === 'prs' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: dashView === 'prs' ? '#0a1628' : '#aaa', fontWeight: dashView === 'prs' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Personal Records</button>
+            {!isAdult && (
+              <button onClick={() => setDashView('score')} style={{ padding: '10px 24px', background: dashView === 'score' ? 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: dashView === 'score' ? '#fff' : '#aaa', fontWeight: dashView === 'score' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Athlete Score</button>
+            )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
-            {Object.entries(testSet).map(([k, c]) => (
-              <div key={k}>
-                <h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{c.label}</h4>
-                {c.tests.map(t => {
-                  const pr = getPR(athlete.id, t.id);
-                  return (
-                    <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14 }}>
-                      <span style={{ color: '#aaa' }}>{t.name}</span>
-                      <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{formatPRDisplay(t, pr)}</span>
-                    </div>
-                  );
-                })}
+
+          {/* Personal Records view */}
+          {dashView === 'prs' && (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${isAdult ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: 20 }}>{athlete.first_name} {athlete.last_name}'s Personal Records</h2>
+                {isAdult && <span style={{ fontSize: 12, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '3px 10px', borderRadius: 10, fontWeight: 600 }}>ADULT CLIENT</span>}
               </div>
-            ))}
-          </div>
-        </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
+                {Object.entries(testSet).map(([k, c]) => (
+                  <div key={k}>
+                    <h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{c.label}</h4>
+                    {c.tests.map(t => {
+                      const pr = getPR(athlete.id, t.id);
+                      return (
+                        <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14 }}>
+                          <span style={{ color: '#aaa' }}>{t.name}</span>
+                          <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{formatPRDisplay(t, pr)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Athlete Score view */}
+          {dashView === 'score' && !isAdult && (
+            <div style={{ background: 'rgba(168,85,247,0.06)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(168,85,247,0.25)' }}>
+              <h2 style={{ margin: '0 0 20px 0', fontSize: 20, color: '#c084fc' }}>{athlete.first_name}'s Athlete Score</h2>
+
+              {athleteScore ? (
+                <>
+                  {/* Big score display */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 32, marginBottom: 28, flexWrap: 'wrap' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 80, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: scoreLabel(athleteScore.score).color, lineHeight: 1 }}>{athleteScore.score}</div>
+                      <div style={{ fontSize: 13, color: scoreLabel(athleteScore.score).color, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>{scoreLabel(athleteScore.score).label}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{athleteScore.testsUsed} of {athleteScore.totalTests} tests scored · compared against {athletes.filter(a => (a.type || 'athlete') === 'athlete').length} youth athletes</div>
+                      <div style={{ fontSize: 12, color: '#666', lineHeight: 1.6 }}>
+                        50 = gym average &nbsp;·&nbsp; 60 = top ~16% &nbsp;·&nbsp; 70+ = elite
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score bar */}
+                  <div style={{ marginBottom: 28 }}>
+                    <div style={{ height: 12, background: 'rgba(255,255,255,0.08)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                      <div style={{ height: '100%', width: `${athleteScore.score}%`, background: `linear-gradient(90deg, #7c3aed, ${scoreLabel(athleteScore.score).color})`, borderRadius: 6, transition: 'width 0.5s ease' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555', marginTop: 4 }}>
+                      <span>0</span><span>25</span><span>50 avg</span><span>75</span><span>100</span>
+                    </div>
+                  </div>
+
+                  {/* Breakdown by test */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+                    {athleteScore.breakdown.map(item => {
+                      const sl = scoreLabel(item.tScore);
+                      const testDef = TSA_TEST_DEFS.find(t => t.id === item.testId);
+                      const displayVal = item.testId === 'max_velocity'
+                        ? item.best.toFixed(1) + ' MPH'
+                        : item.testId === 'vertical_jump' || item.testId === 'broad_jump'
+                          ? item.best.toFixed(1) + ' in'
+                          : item.testId === 'rsi'
+                            ? item.best.toFixed(2)
+                            : item.unit
+                              ? item.best.toFixed(item.unit === 'sec' ? 2 : 0) + ' ' + item.unit
+                              : item.best.toFixed(1);
+                      return (
+                        <div key={item.testId} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: '12px 14px', border: `1px solid ${sl.color}30` }}>
+                          <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{item.label}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <span style={{ fontSize: 22, fontWeight: 800, color: sl.color }}>{item.tScore}</span>
+                            <span style={{ fontSize: 12, color: '#666' }}>{displayVal}</span>
+                          </div>
+                          <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${item.tScore}%`, background: sl.color, borderRadius: 2 }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Placeholder cards for missing tests */}
+                    {TSA_TEST_DEFS.filter(t => !athleteScore.breakdown.find(b => b.testId === t.id)).map(t => (
+                      <div key={t.id} style={{ background: 'rgba(0,0,0,0.1)', borderRadius: 8, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.05)', opacity: 0.5 }}>
+                        <div style={{ fontSize: 11, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{t.label}</div>
+                        <div style={{ fontSize: 13, color: '#444' }}>No data</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
+                  <p style={{ fontSize: 16, marginBottom: 8 }}>Not enough data to calculate an Athlete Score.</p>
+                  <p style={{ fontSize: 13 }}>Needs at least one result in 1 of the 7 scored tests (vert, clean, back squat, 5-10 fly, max velocity, 5-0-5, RSI).</p>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {testResults.length > 0 && (
@@ -1352,11 +1517,53 @@ function RecordBoardPage({ athletes, results }) {
   };
 
   const SECTIONS = ['boys', 'girls', 'adults'];
+
+  // Auto-switch interval
   useEffect(() => {
     if (!autoSwitch) return;
     const interval = setInterval(() => setSection(s => { const i = SECTIONS.indexOf(s); return SECTIONS[(i + 1) % SECTIONS.length]; }), 60000);
     return () => clearInterval(interval);
   }, [autoSwitch]);
+
+  // TV mode: auto-scale layout to fill screen
+  const tvContentRef = useRef(null);
+  const tvContainerRef = useRef(null);
+  const [tvScale, setTvScale] = useState(1);
+
+  useEffect(() => {
+    if (!tvMode) return;
+    const recalc = () => {
+      const content = tvContentRef.current;
+      const container = tvContainerRef.current;
+      if (!content || !container) return;
+      content.style.transform = 'none';
+      content.style.width = container.clientWidth + 'px';
+      const naturalH = content.scrollHeight;
+      const availH = container.clientHeight;
+      const scale = Math.min(availH / naturalH, 1);
+      setTvScale(scale);
+      content.style.width = (container.clientWidth / scale) + 'px';
+      content.style.transform = `scale(${scale})`;
+    };
+    const timer = setTimeout(recalc, 50);
+    window.addEventListener('resize', recalc);
+    return () => { clearTimeout(timer); window.removeEventListener('resize', recalc); };
+  }, [tvMode, section]);
+
+  // TV mode keep-alive: dispatch a synthetic mousemove every 10 minutes
+  // to prevent Fire Stick / smart TV browsers from sleeping the display
+  useEffect(() => {
+    if (!tvMode) return;
+    const keepAlive = setInterval(() => {
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        cancelable: true,
+        clientX: Math.floor(Math.random() * (window.innerWidth || 1920)),
+        clientY: Math.floor(Math.random() * (window.innerHeight || 1080)),
+      }));
+    }, 10 * 60 * 1000); // every 10 minutes
+    return () => clearInterval(keepAlive);
+  }, [tvMode]);
 
   const renderTestCard = (test, records, isTv) => {
     const hs = records[test.id]?.hs || [];
@@ -1408,33 +1615,6 @@ function RecordBoardPage({ athletes, results }) {
 
   const sectionLabels = { boys: 'BOYS RECORDS', girls: 'GIRLS RECORDS', adults: 'ADULT RECORDS' };
   const sectionColors = { boys: '#00d4ff', girls: '#ff6ec7', adults: '#C8963E' };
-
-  const tvContentRef = useRef(null);
-  const tvContainerRef = useRef(null);
-  const [tvScale, setTvScale] = useState(1);
-
-  useEffect(() => {
-    if (!tvMode) return;
-    const recalc = () => {
-      const content = tvContentRef.current;
-      const container = tvContainerRef.current;
-      if (!content || !container) return;
-      // Reset to measure natural height at full container width
-      content.style.transform = 'none';
-      content.style.width = container.clientWidth + 'px';
-      const naturalH = content.scrollHeight;
-      const availH = container.clientHeight;
-      // Scale based on height only
-      const scale = Math.min(availH / naturalH, 1);
-      setTvScale(scale);
-      // Stretch content width so after scaling it fills full container width
-      content.style.width = (container.clientWidth / scale) + 'px';
-      content.style.transform = `scale(${scale})`;
-    };
-    const timer = setTimeout(recalc, 50);
-    window.addEventListener('resize', recalc);
-    return () => { clearTimeout(timer); window.removeEventListener('resize', recalc); };
-  }, [tvMode, section]);
 
   if (tvMode) {
     return (
