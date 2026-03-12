@@ -102,14 +102,12 @@ const getAllTests = () => Object.values(ALL_TEST_DEFS);
 const getTestById = (id) => ALL_TEST_DEFS[id] || null;
 
 /* ===================== ATHLETE SCORE (TSA) ===================== */
-// Z-score composite across 7 tests, scaled to 0–100 T-score (50 = avg, ±10 = ±1 SD)
-// Tests: vert, clean, back squat, 5-10 fly, max velocity (MPH), 5-0-5, RSI
 const TSA_TEST_DEFS = [
   { id: 'vertical_jump', label: 'Vertical Jump',  direction: 'higher', unit: 'in' },
   { id: 'clean',         label: 'Clean',           direction: 'higher', unit: 'lbs' },
   { id: '_best_squat',   label: 'Best Squat',      direction: 'higher', unit: 'lbs', rollupIds: ['back_squat', 'front_squat'] },
   { id: '5_10_fly',      label: '5-10 Fly',        direction: 'lower',  unit: 'sec' },
-  { id: 'max_velocity',  label: 'Max Velocity',    direction: 'higher', unit: 'MPH' }, // converted_value already MPH
+  { id: 'max_velocity',  label: 'Max Velocity',    direction: 'higher', unit: 'MPH' },
   { id: '5_0_5',         label: '5-0-5',           direction: 'lower',  unit: 'sec' },
   { id: 'rsi',           label: 'RSI',             direction: 'higher', unit: '' },
 ];
@@ -117,7 +115,6 @@ const TSA_TEST_DEFS = [
 const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
   const youthAthletes = allAthletes.filter(a => (a.type || 'athlete') === 'athlete');
 
-  // Helper: get best value for an athlete across one or more test IDs (supports rollupIds)
   const getBest = (aId, t) => {
     const ids = t.rollupIds || [t.id];
     const vals = allResults
@@ -128,7 +125,6 @@ const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
     return t.direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
   };
 
-  // Build population mean/SD per test from all youth athletes
   const popStats = {};
   TSA_TEST_DEFS.forEach(t => {
     const vals = [];
@@ -136,13 +132,12 @@ const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
       const best = getBest(a.id, t);
       if (best !== null) vals.push(best);
     });
-    if (vals.length < 5) { popStats[t.id] = null; return; } // need at least 5 data points
+    if (vals.length < 5) { popStats[t.id] = null; return; }
     const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
     const sd   = Math.sqrt(vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / vals.length) || 1;
     popStats[t.id] = { mean, sd, n: vals.length };
   });
 
-  // Score the target athlete
   const zScores = [];
   const breakdown = [];
   TSA_TEST_DEFS.forEach(t => {
@@ -150,21 +145,18 @@ const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
     const best = getBest(athleteId, t);
     if (best === null) return;
     const { mean, sd } = popStats[t.id];
-    // For lower-is-better, flip sign so better performance = positive z
     const z = t.direction === 'lower' ? (mean - best) / sd : (best - mean) / sd;
-    const tScore = normalCDF(z); // percentile 1–99
+    const tScore = normalCDF(z);
     zScores.push(z);
     breakdown.push({ testId: t.id, label: t.label, unit: t.unit, z, tScore, best, n: popStats[t.id].n });
   });
 
   if (zScores.length === 0) return null;
   const avgZ   = zScores.reduce((s, v) => s + v, 0) / zScores.length;
-  const overall = normalCDF(avgZ); // percentile 1–99
+  const overall = normalCDF(avgZ);
   return { score: overall, testsUsed: zScores.length, totalTests: TSA_TEST_DEFS.length, breakdown, avgZ };
 };
 
-// Normal distribution CDF approximation (Abramowitz & Stegun)
-// Converts z-score → percentile 0–100
 const normalCDF = (z) => {
   const t = 1 / (1 + 0.2316419 * Math.abs(z));
   const d = 0.3989423 * Math.exp(-z * z / 2);
@@ -201,7 +193,6 @@ const formatRowTime = (totalSeconds) => {
   return `${m}:${sec < 10 ? '0' : ''}${sec.toFixed(1)}`;
 };
 
-// Smart numeric formatter — preserves decimals based on test unit type
 const formatNumericResult = (testId, value) => {
   if (value === null || value === undefined) return '-';
   const v = parseFloat(value);
@@ -213,7 +204,7 @@ const formatNumericResult = (testId, value) => {
   if (unit === 'MPH') return v.toFixed(1);
   if (unit === 'inches') return String(Math.round(v * 10) / 10);
   if (unit === '%') return String(v);
-  return String(Math.round(v)); // lbs, reps
+  return String(Math.round(v));
 };
 
 /* ===================== SEARCH PICKER ===================== */
@@ -934,7 +925,7 @@ function SimpleChart({ data, direction, testId }) {
 function DashboardPage({ athletes, results, getPR }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [selectedTest, setSelectedTest] = useState('');
-  const [dashView, setDashView] = useState('prs'); // 'prs' | 'score'
+  const [dashView, setDashView] = useState('prs');
   const athlete = athletes.find(a => a.id === selectedAthlete);
   const isAdult = athlete && athlete.type === 'adult';
   const testSet = isAdult ? ADULT_TESTS : TESTS;
@@ -944,7 +935,6 @@ function DashboardPage({ athletes, results, getPR }) {
   const currentPR = selectedAthlete && selectedTest ? getPR(selectedAthlete, selectedTest) : null;
   const iStyle = { width: '100%', padding: '14px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
-  // Athlete Score
   const athleteScore = (!isAdult && selectedAthlete) ? calculateAthleteScore(selectedAthlete, athletes, results) : null;
 
   const formatPRDisplay = (t, pr) => {
@@ -976,7 +966,6 @@ function DashboardPage({ athletes, results, getPR }) {
 
       {athlete && (
         <>
-          {/* View toggle — PRs vs Athlete Score (youth only) */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
             <button onClick={() => setDashView('prs')} style={{ padding: '10px 24px', background: dashView === 'prs' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: dashView === 'prs' ? '#0a1628' : '#aaa', fontWeight: dashView === 'prs' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Personal Records</button>
             {!isAdult && (
@@ -984,7 +973,6 @@ function DashboardPage({ athletes, results, getPR }) {
             )}
           </div>
 
-          {/* Personal Records view */}
           {dashView === 'prs' && (
             <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${isAdult ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -1010,14 +998,12 @@ function DashboardPage({ athletes, results, getPR }) {
             </div>
           )}
 
-          {/* Athlete Score view */}
           {dashView === 'score' && !isAdult && (
             <div style={{ background: 'rgba(168,85,247,0.06)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(168,85,247,0.25)' }}>
               <h2 style={{ margin: '0 0 20px 0', fontSize: 20, color: '#c084fc' }}>{athlete.first_name}'s Athlete Score</h2>
 
               {athleteScore ? (
                 <>
-                  {/* Big score display */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 32, marginBottom: 28, flexWrap: 'wrap' }}>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 80, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: scoreLabel(athleteScore.score).color, lineHeight: 1 }}>{athleteScore.score}</div>
@@ -1031,7 +1017,6 @@ function DashboardPage({ athletes, results, getPR }) {
                     </div>
                   </div>
 
-                  {/* Score bar */}
                   <div style={{ marginBottom: 28 }}>
                     <div style={{ height: 12, background: 'rgba(255,255,255,0.08)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
                       <div style={{ height: '100%', width: `${athleteScore.score}%`, background: `linear-gradient(90deg, #7c3aed, ${scoreLabel(athleteScore.score).color})`, borderRadius: 6, transition: 'width 0.5s ease' }} />
@@ -1041,11 +1026,9 @@ function DashboardPage({ athletes, results, getPR }) {
                     </div>
                   </div>
 
-                  {/* Breakdown by test */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
                     {athleteScore.breakdown.map(item => {
                       const sl = scoreLabel(item.tScore);
-                      const testDef = TSA_TEST_DEFS.find(t => t.id === item.testId);
                       const displayVal = item.testId === 'max_velocity'
                         ? item.best.toFixed(1) + ' MPH'
                         : item.testId === 'vertical_jump' || item.testId === 'broad_jump'
@@ -1068,7 +1051,6 @@ function DashboardPage({ athletes, results, getPR }) {
                         </div>
                       );
                     })}
-                    {/* Placeholder cards for missing tests */}
                     {TSA_TEST_DEFS.filter(t => !athleteScore.breakdown.find(b => b.testId === t.id)).map(t => (
                       <div key={t.id} style={{ background: 'rgba(0,0,0,0.1)', borderRadius: 8, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.05)', opacity: 0.5 }}>
                         <div style={{ fontSize: 11, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{t.label}</div>
@@ -1537,6 +1519,49 @@ function RecordBoardPage({ athletes, results }) {
     return () => clearInterval(interval);
   }, [autoSwitch]);
 
+  // ===================== WAKE LOCK API =====================
+  // Requests a screen wake lock when TV mode is active so the
+  // Firestick / browser never dims or sleeps the display.
+  const wakeLockRef = useRef(null);
+
+  useEffect(() => {
+    if (!tvMode) {
+      // Release the lock when TV mode exits
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+      return;
+    }
+
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {
+        // Wake Lock not supported or denied — fall back silently
+      }
+    };
+
+    requestWakeLock();
+
+    // Re-acquire if the page becomes visible again (e.g. after tab switch)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [tvMode]);
+  // ===================== END WAKE LOCK =====================
+
   // TV mode: auto-scale layout to fill screen
   const tvContentRef = useRef(null);
   const tvContainerRef = useRef(null);
@@ -1563,7 +1588,6 @@ function RecordBoardPage({ athletes, results }) {
   }, [tvMode, section]);
 
   // TV mode keep-alive: dispatch a synthetic mousemove every 10 minutes
-  // to prevent Fire Stick / smart TV browsers from sleeping the display
   useEffect(() => {
     if (!tvMode) return;
     const keepAlive = setInterval(() => {
@@ -1573,7 +1597,7 @@ function RecordBoardPage({ athletes, results }) {
         clientX: Math.floor(Math.random() * (window.innerWidth || 1920)),
         clientY: Math.floor(Math.random() * (window.innerHeight || 1080)),
       }));
-    }, 10 * 60 * 1000); // every 10 minutes
+    }, 10 * 60 * 1000);
     return () => clearInterval(keepAlive);
   }, [tvMode]);
 
@@ -2018,7 +2042,6 @@ function RankingsPage({ athletes, results }) {
 
   const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
 
-  // Build scored list
   const scored = youthAthletes
     .map(a => {
       const s = calculateAthleteScore(a.id, athletes, results);
@@ -2043,7 +2066,6 @@ function RankingsPage({ athletes, results }) {
         <p style={{ color: '#888' }}>{scoredCount} of {totalYouth} athletes scored · percentile rank within your gym</p>
       </div>
 
-      {/* Filters */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
           {[['all','All'],['male','Boys'],['female','Girls']].map(([val, label]) => (
@@ -2072,34 +2094,25 @@ function RankingsPage({ athletes, results }) {
             const rankColor = rank === 1 ? '#C8963E' : rank === 2 ? '#A0A0B0' : rank === 3 ? '#A0622A' : '#555';
             return (
               <div key={row.athlete.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: `1px solid ${rank <= 3 ? rankColor + '40' : 'rgba(255,255,255,0.07)'}` }}>
-                {/* Rank */}
                 <div style={{ width: 40, textAlign: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: rank <= 3 ? 22 : 18, color: rankColor, flexShrink: 0 }}>
                   {rank <= 3 ? ['🥇','🥈','🥉'][rank-1] : rank}
                 </div>
-
-                {/* Name + meta */}
                 <div style={{ flex: '0 0 180px' }}>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
                   <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
                     {age && `${age} yrs`}{row.athlete.gender && ` · ${row.athlete.gender}`}
                   </div>
                 </div>
-
-                {/* Score + label */}
                 <div style={{ flex: '0 0 120px', textAlign: 'center' }}>
                   <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: sl.color, lineHeight: 1 }}>{row.score}</div>
                   <div style={{ fontSize: 11, color: sl.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 }}>{sl.label}</div>
                 </div>
-
-                {/* Bar */}
                 <div style={{ flex: 1, minWidth: 100 }}>
                   <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${row.score}%`, background: `linear-gradient(90deg, #7c3aed, ${sl.color})`, borderRadius: 4 }} />
                   </div>
                   <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>{row.testsUsed}/{row.totalTests} tests</div>
                 </div>
-
-                {/* Per-test mini scores */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flex: '0 0 auto' }}>
                   {TSA_TEST_DEFS.map(t => {
                     const b = row.breakdown.find(x => x.testId === t.id);
