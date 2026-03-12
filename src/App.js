@@ -152,22 +152,32 @@ const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
     const { mean, sd } = popStats[t.id];
     // For lower-is-better, flip sign so better performance = positive z
     const z = t.direction === 'lower' ? (mean - best) / sd : (best - mean) / sd;
-    const tScore = Math.max(0, Math.min(100, Math.round(z * 10 + 50)));
+    const tScore = normalCDF(z); // percentile 1–99
     zScores.push(z);
     breakdown.push({ testId: t.id, label: t.label, unit: t.unit, z, tScore, best, n: popStats[t.id].n });
   });
 
   if (zScores.length === 0) return null;
   const avgZ   = zScores.reduce((s, v) => s + v, 0) / zScores.length;
-  const overall = Math.max(0, Math.min(100, Math.round(avgZ * 10 + 50)));
-  return { score: overall, testsUsed: zScores.length, totalTests: TSA_TEST_DEFS.length, breakdown };
+  const overall = normalCDF(avgZ); // percentile 1–99
+  return { score: overall, testsUsed: zScores.length, totalTests: TSA_TEST_DEFS.length, breakdown, avgZ };
+};
+
+// Normal distribution CDF approximation (Abramowitz & Stegun)
+// Converts z-score → percentile 0–100
+const normalCDF = (z) => {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  const cdf = z > 0 ? 1 - p : p;
+  return Math.max(1, Math.min(99, Math.round(cdf * 100)));
 };
 
 const scoreLabel = (score) => {
-  if (score >= 70) return { label: 'Elite',         color: '#ffd700' };
-  if (score >= 60) return { label: 'Above Average', color: '#00ff88' };
-  if (score >= 45) return { label: 'Average',       color: '#00d4ff' };
-  if (score >= 35) return { label: 'Below Average', color: '#FFA500' };
+  if (score >= 90) return { label: 'Elite',         color: '#ffd700' };
+  if (score >= 75) return { label: 'Above Average', color: '#00ff88' };
+  if (score >= 40) return { label: 'Average',       color: '#00d4ff' };
+  if (score >= 20) return { label: 'Below Average', color: '#FFA500' };
   return                  { label: 'Developing',    color: '#ff6666' };
 };
 
@@ -456,6 +466,7 @@ export default function App() {
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'rankings', label: '📊 Rankings' },
     { id: 'recentprs', label: '🔥 Recent PRs' },
     { id: 'manage', label: '⚙️ Manage' },
     { id: 'jumpcalc', label: '📏 Jump Calc' },
@@ -495,6 +506,7 @@ export default function App() {
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getAthleteById={getAthleteById} />}
         {page === 'manage' && <ManagePage athletes={athletes} results={results} getAthleteById={getAthleteById} deleteResult={deleteResult} updateResult={updateResult} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
+        {page === 'rankings' && <RankingsPage athletes={athletes} results={results} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} />}
       </main>
 
@@ -1014,7 +1026,7 @@ function DashboardPage({ athletes, results, getPR }) {
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{athleteScore.testsUsed} of {athleteScore.totalTests} tests scored · compared against {athletes.filter(a => (a.type || 'athlete') === 'athlete').length} youth athletes</div>
                       <div style={{ fontSize: 12, color: '#666', lineHeight: 1.6 }}>
-                        50 = gym average &nbsp;·&nbsp; 60 = top ~16% &nbsp;·&nbsp; 70+ = elite
+                        Score = percentile rank &nbsp;·&nbsp; 50 = gym average &nbsp;·&nbsp; 90+ = elite
                       </div>
                     </div>
                   </div>
@@ -1025,7 +1037,7 @@ function DashboardPage({ athletes, results, getPR }) {
                       <div style={{ height: '100%', width: `${athleteScore.score}%`, background: `linear-gradient(90deg, #7c3aed, ${scoreLabel(athleteScore.score).color})`, borderRadius: 6, transition: 'width 0.5s ease' }} />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555', marginTop: 4 }}>
-                      <span>0</span><span>25</span><span>50 avg</span><span>75</span><span>100</span>
+                      <span>1st %ile</span><span>25th</span><span>50th avg</span><span>75th</span><span>99th</span>
                     </div>
                   </div>
 
@@ -1995,6 +2007,115 @@ function AdultRecordBoardPage({ athletes, results }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
         {ADULT_BOARD_TESTS.map(test => renderCard(test))}
       </div>
+    </div>
+  );
+}
+
+/* ===================== RANKINGS PAGE ===================== */
+function RankingsPage({ athletes, results }) {
+  const [genderFilter, setGenderFilter] = useState('all');
+  const [minTests, setMinTests] = useState(1);
+
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+
+  // Build scored list
+  const scored = youthAthletes
+    .map(a => {
+      const s = calculateAthleteScore(a.id, athletes, results);
+      return s ? { athlete: a, ...s } : null;
+    })
+    .filter(Boolean)
+    .filter(row => row.testsUsed >= minTests)
+    .filter(row => {
+      if (genderFilter === 'all') return true;
+      const g = (row.athlete.gender || '').toLowerCase();
+      return genderFilter === 'female' ? g === 'female' : g !== 'female';
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const totalYouth = youthAthletes.length;
+  const scoredCount = scored.length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Athlete Score Rankings</h1>
+        <p style={{ color: '#888' }}>{scoredCount} of {totalYouth} athletes scored · percentile rank within your gym</p>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {[['all','All'],['male','Boys'],['female','Girls']].map(([val, label]) => (
+            <button key={val} onClick={() => setGenderFilter(val)} style={{ padding: '10px 20px', background: genderFilter === val ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: genderFilter === val ? '2px solid #00d4ff' : '2px solid transparent', color: genderFilter === val ? '#00d4ff' : '#666', fontWeight: genderFilter === val ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, color: '#666' }}>Min tests scored:</span>
+          {[1, 2, 3, 4].map(n => (
+            <button key={n} onClick={() => setMinTests(n)} style={{ width: 36, height: 36, background: minTests === n ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: minTests === n ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: minTests === n ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 14, fontWeight: minTests === n ? 700 : 400 }}>{n}+</button>
+          ))}
+        </div>
+      </div>
+
+      {scored.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>
+          <p style={{ fontSize: 18 }}>No athletes scored yet.</p>
+          <p style={{ fontSize: 14, marginTop: 8 }}>Athletes need results in at least one of the 7 scored tests: Vertical Jump, Clean, Best Squat, 5-10 Fly, Max Velocity, 5-0-5, RSI.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {scored.map((row, i) => {
+            const sl = scoreLabel(row.score);
+            const age = calculateAge(row.athlete.birthday);
+            const rank = i + 1;
+            const rankColor = rank === 1 ? '#C8963E' : rank === 2 ? '#A0A0B0' : rank === 3 ? '#A0622A' : '#555';
+            return (
+              <div key={row.athlete.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: `1px solid ${rank <= 3 ? rankColor + '40' : 'rgba(255,255,255,0.07)'}` }}>
+                {/* Rank */}
+                <div style={{ width: 40, textAlign: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: rank <= 3 ? 22 : 18, color: rankColor, flexShrink: 0 }}>
+                  {rank <= 3 ? ['🥇','🥈','🥉'][rank-1] : rank}
+                </div>
+
+                {/* Name + meta */}
+                <div style={{ flex: '0 0 180px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                    {age && `${age} yrs`}{row.athlete.gender && ` · ${row.athlete.gender}`}
+                  </div>
+                </div>
+
+                {/* Score + label */}
+                <div style={{ flex: '0 0 120px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: sl.color, lineHeight: 1 }}>{row.score}</div>
+                  <div style={{ fontSize: 11, color: sl.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginTop: 2 }}>{sl.label}</div>
+                </div>
+
+                {/* Bar */}
+                <div style={{ flex: 1, minWidth: 100 }}>
+                  <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${row.score}%`, background: `linear-gradient(90deg, #7c3aed, ${sl.color})`, borderRadius: 4 }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>{row.testsUsed}/{row.totalTests} tests</div>
+                </div>
+
+                {/* Per-test mini scores */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flex: '0 0 auto' }}>
+                  {TSA_TEST_DEFS.map(t => {
+                    const b = row.breakdown.find(x => x.testId === t.id);
+                    return (
+                      <div key={t.id} title={t.label} style={{ width: 36, height: 36, borderRadius: 6, background: b ? `${scoreLabel(b.tScore).color}22` : 'rgba(255,255,255,0.04)', border: `1px solid ${b ? scoreLabel(b.tScore).color + '55' : 'rgba(255,255,255,0.06)'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: b ? scoreLabel(b.tScore).color : '#333' }}>{b ? b.tScore : '—'}</span>
+                        <span style={{ fontSize: 8, color: '#555', textAlign: 'center', lineHeight: 1, marginTop: 1 }}>{t.label.split(' ')[0]}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
