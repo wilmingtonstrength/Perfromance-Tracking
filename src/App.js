@@ -383,7 +383,7 @@ function OnboardingPage({ user, onComplete }) {
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Brand Color</label>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {['#00d4ff', '#e63946', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#3498db'].map(c => (
+                {['#00d4ff', '#e63946', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#3498db', '#ff6b35', '#c0392b', '#27ae60', '#2980b9', '#8e44ad', '#d35400', '#16a085', '#f1c40f', '#e84393', '#6c5ce7', '#00b894', '#fdcb6e', '#e17055', '#0984e3', '#636e72', '#b71540', '#0c2461', '#079992'].map(c => (
                   <div key={c} onClick={() => setPrimaryColor(c)} style={{ width: 44, height: 44, borderRadius: 10, background: c, cursor: 'pointer', border: primaryColor === c ? '3px solid #fff' : '3px solid transparent', transition: 'all 0.15s' }} />
                 ))}
               </div>
@@ -605,7 +605,6 @@ export default function App() {
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
-    { id: 'rankings', label: '📊 Rankings' },
     { id: 'recentprs', label: '🔥 Recent PRs' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'settings', label: '⚙️ Settings' },
@@ -643,7 +642,6 @@ export default function App() {
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <KMTestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} accentColor={accentColor} />}
         {page === 'athletes' && <KMAthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} />}
-        {page === 'rankings' && <KMRankingsPage athletes={athletes} results={results} customTests={customTests} accentColor={accentColor} />}
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
         {page === 'settings' && <KMSettingsPage gym={gym} setGym={setGym} customTests={customTests} setCustomTests={setCustomTests} gymId={gymId} showNotification={showNotification} user={user} accentColor={accentColor} />}
@@ -896,8 +894,8 @@ function KMAthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, re
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-            {['prs', 'history', 'progress', 'score'].map(tab => (
-              <button key={tab} onClick={() => setProfileTab(tab)} style={{ padding: '10px 20px', background: profileTab === tab ? `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: profileTab === tab ? '#0a1628' : '#aaa', fontWeight: profileTab === tab ? 700 : 500, cursor: 'pointer', fontSize: 14, textTransform: 'capitalize' }}>{tab === 'prs' ? 'Personal Records' : tab === 'history' ? 'Test History' : tab === 'progress' ? 'Progress' : 'Athlete Score'}</button>
+            {['prs', 'history', 'progress'].map(tab => (
+              <button key={tab} onClick={() => setProfileTab(tab)} style={{ padding: '10px 20px', background: profileTab === tab ? `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: profileTab === tab ? '#0a1628' : '#aaa', fontWeight: profileTab === tab ? 700 : 500, cursor: 'pointer', fontSize: 14, textTransform: 'capitalize' }}>{tab === 'prs' ? 'Personal Records' : tab === 'history' ? 'Test History' : 'Progress'}</button>
             ))}
           </div>
           {profileTab === 'prs' && (
@@ -1062,50 +1060,29 @@ function KMRankingsPage({ athletes, results, customTests, accentColor }) {
 
 /* ===================== RECORD BOARD ===================== */
 function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, accentColor }) {
-  const [gender, setGender] = useState('boys');
   const [tvMode, setTvMode] = useState(false);
-  const [autoSwitch, setAutoSwitch] = useState(false);
 
   const boardTests = customTests.filter(t => t.show_on_record_board && t.active);
   const speedTests = boardTests.filter(t => t.category === 'speed' || t.category === 'agility' || t.category === 'power');
   const strengthTests = boardTests.filter(t => t.category === 'strength');
 
-  const getAgeAtTest = (dob, testDate) => {
-    if (!dob || !testDate) return null;
-    const b = new Date(String(dob).slice(0, 10) + 'T00:00:00'); const t = new Date(testDate);
-    let age = t.getFullYear() - b.getFullYear();
-    if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) age--;
-    return age;
-  };
-
-  const buildRecords = (tests, genderFilter) => {
+  const buildRecords = (tests) => {
     const records = {};
     tests.forEach(test => {
-      records[test.id] = { hs: [], ms: [] };
+      const entries = [];
       results.forEach(r => {
         if (r.custom_test_id !== test.id) return;
         const a = athletes.find(x => x.id === r.athlete_id);
         if (!a) return;
-        const g = (a.gender || '').toLowerCase();
-        const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
-        if (!isMatch) return;
         const val = parseFloat(r.value); if (isNaN(val)) return;
-        const age = getAgeAtTest(a.date_of_birth, r.tested_at);
-        const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val };
-        records[test.id]['hs'].push(entry);
-        if (age !== null && age < 15) records[test.id]['ms'].push(entry);
+        entries.push({ name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val });
       });
-      ['hs', 'ms'].forEach(cat => {
-        records[test.id][cat].sort((a, b) => test.direction === 'lower' ? a.value - b.value : b.value - a.value);
-        const seen = new Set();
-        records[test.id][cat] = records[test.id][cat].filter(r => { if (seen.has(r.name)) return false; seen.add(r.name); return true; }).slice(0, 5);
-      });
+      entries.sort((a, b) => test.direction === 'lower' ? a.value - b.value : b.value - a.value);
+      const seen = new Set();
+      records[test.id] = entries.filter(r => { if (seen.has(r.name)) return false; seen.add(r.name); return true; }).slice(0, 5);
     });
     return records;
   };
-
-  const SECTIONS = ['boys', 'girls'];
-  useEffect(() => { if (!autoSwitch) return; const i = setInterval(() => setGender(g => g === 'boys' ? 'girls' : 'boys'), 60000); return () => clearInterval(i); }, [autoSwitch]);
 
   const wakeLockRef = useRef(null);
   useEffect(() => {
@@ -1119,27 +1096,22 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
 
   useEffect(() => { if (!tvMode) return; const i = setInterval(() => { document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: Math.random() * 1920, clientY: Math.random() * 1080 })); }, 600000); return () => clearInterval(i); }, [tvMode]);
 
-  const speedRecs = buildRecords(speedTests, gender);
-  const strRecs = buildRecords(strengthTests, gender);
+  const speedRecs = buildRecords(speedTests);
+  const strRecs = buildRecords(strengthTests);
   const gold = '#C8963E';
-  const gLabel = gender === 'boys' ? 'BOYS RECORDS' : 'GIRLS RECORDS';
-  const gColor = gender === 'boys' ? accentColor : '#ff6ec7';
+  const rankColors = [gold, '#A0A0B0', '#A0622A', '#888', '#666'];
 
   const renderCard = (test, records, isTv) => {
-    const hs = records[test.id]?.hs || []; const ms = records[test.id]?.ms || [];
-    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (
-      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: `linear-gradient(90deg, ${gold}44 0%, ${gold}0d 100%)`, borderLeft: `3px solid ${gold}` } : {}) }}>
-        <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: i === 0 ? gold : '#e8e8e8' }}>{formatTestValueByDef(test, r.value)}</span>
-        <span style={{ color: '#888', fontSize: isTv ? 12 : 13 }}>{r.name}</span>
-      </div>
-    )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13 }}>—</div>;
+    const list = records[test.id] || [];
     return (
       <div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ textAlign: 'center', fontSize: isTv ? 14 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: `2px solid ${gold}`, letterSpacing: 1 }}>{test.name}</div>
-        <div style={{ fontSize: 11, color: accentColor, textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>15+</div>
-        {renderRows(hs)}
-        <div style={{ fontSize: 11, color: accentColor, textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>14 & UNDER</div>
-        {renderRows(ms)}
+        {list.length > 0 ? list.map((r, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: `linear-gradient(90deg, ${gold}44 0%, ${gold}0d 100%)`, borderLeft: `3px solid ${gold}` } : {}) }}>
+            <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: rankColors[i] || '#666' }}>{formatTestValueByDef(test, r.value)}</span>
+            <span style={{ color: '#888', fontSize: isTv ? 12 : 13 }}>{r.name}</span>
+          </div>
+        )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 8 }}>No data yet</div>}
       </div>
     );
   };
@@ -1147,9 +1119,9 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
   if (tvMode) {
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: '8px 6px', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 6, borderBottom: `4px solid ${gColor}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 6, borderBottom: `4px solid ${accentColor}` }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: accentColor, letterSpacing: 3, fontFamily: "'Archivo Black'" }}>{(gym?.name || 'KAIMETRIC').toUpperCase()}</div>
-          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: gColor }}>{gLabel}</div>
+          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: gold }}>RECORD BOARD</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT</button>
         </div>
         {speedTests.length > 0 && (<><div style={{ fontSize: 18, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 10, marginBottom: 8 }}>SPEED & POWER</div><div style={{ display: 'grid', gridTemplateColumns: `repeat(${speedTests.length}, 1fr)`, gap: 8, marginBottom: 10 }}>{speedTests.map(t => renderCard(t, speedRecs, true))}</div></>)}
@@ -1162,17 +1134,9 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>Record Board</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setAutoSwitch(a => !a)} style={{ padding: '10px 16px', background: autoSwitch ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)', border: `2px solid ${autoSwitch ? '#00ff88' : '#666'}`, borderRadius: 6, color: autoSwitch ? '#00ff88' : '#888', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>{autoSwitch ? 'Pause' : 'Auto (60s)'}</button>
-          <button onClick={() => { setAutoSwitch(true); setTvMode(true); }} style={{ padding: '10px 16px', background: `linear-gradient(135deg, ${gold} 0%, #A87A2E 100%)`, border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>TV Mode</button>
-        </div>
+        <button onClick={() => setTvMode(true)} style={{ padding: '10px 16px', background: `linear-gradient(135deg, ${gold} 0%, #A87A2E 100%)`, border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>TV Mode</button>
       </div>
-      <div style={{ display: 'flex', gap: 0, marginBottom: 28, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', width: 'fit-content' }}>
-        {[{ id: 'boys', label: 'Boys', color: accentColor }, { id: 'girls', label: 'Girls', color: '#ff6ec7' }].map(s => (
-          <button key={s.id} onClick={() => setGender(s.id)} style={{ padding: '14px 36px', background: gender === s.id ? 'rgba(255,255,255,0.08)' : 'transparent', border: 'none', borderBottom: gender === s.id ? `3px solid ${s.color}` : '3px solid transparent', color: gender === s.id ? s.color : '#666', fontWeight: gender === s.id ? 700 : 400, cursor: 'pointer', fontSize: 16, fontFamily: "'Archivo Black'", letterSpacing: 1, textTransform: 'uppercase' }}>{s.label}</button>
-        ))}
-      </div>
-      <div style={{ fontSize: 32, fontWeight: 700, marginBottom: 24, letterSpacing: 4, fontFamily: "'Archivo Black'", color: gColor }}>{gLabel}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 24, letterSpacing: 4, fontFamily: "'Archivo Black'", color: gold }}>TOP 5 ALL-TIME</div>
       {speedTests.length > 0 && (<div style={{ marginBottom: 24 }}><div style={{ fontSize: 14, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>{speedTests.map(t => renderCard(t, speedRecs, false))}</div></div>)}
       {strengthTests.length > 0 && (<div><div style={{ fontSize: 14, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>{strengthTests.map(t => renderCard(t, strRecs, false))}</div></div>)}
       {boardTests.length === 0 && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No tests configured for the record board. Go to Settings to enable them.</div>}
