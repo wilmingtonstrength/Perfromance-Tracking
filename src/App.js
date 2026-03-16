@@ -1364,8 +1364,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
 
   const boardSpeed = testDefs.filter(t => t.show_on_record_board && t.record_board_section === 'speed' && t.active);
   const boardStrength = testDefs.filter(t => t.show_on_record_board && t.record_board_section === 'strength' && t.active);
-  const boardAdult = testDefs.filter(t => t.show_on_record_board && t.record_board_section === 'adult' && t.active);
-
+  const boardAdult = testDefs.filter(t => t.show_on_adult_board && t.active);
   const EXCLUDED = ['matt secrest'];
 
   const getAgeAtTest = (birthday, testDate) => {
