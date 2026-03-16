@@ -686,9 +686,13 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
     return age;
   };
 
-  const getOverheadBestForAthlete = (athleteId) => {
-    const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
-    const vals = results.filter(r => r.athlete_id === athleteId && overheadIds.includes(r.test_id)).map(r => parseFloat(r.converted_value || r.raw_value)).filter(v => !isNaN(v));
+  const ROLLUP_MAP = {
+    '_overhead_rollup': ['press', 'push_press', 'jerk', 'overhead'],
+    '_squat_rollup': ['back_squat', 'front_squat'],
+  };
+
+  const getRollupBest = (athleteId, rollupIds) => {
+    const vals = results.filter(r => r.athlete_id === athleteId && rollupIds.includes(r.test_id)).map(r => parseFloat(r.converted_value || r.raw_value)).filter(v => !isNaN(v));
     return vals.length > 0 ? Math.max(...vals) : null;
   };
 
@@ -706,7 +710,8 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
     const records = {};
     tests.forEach(test => {
       records[test.id] = { hs: [], ms: [] };
-      if (test.id === '_overhead_rollup') {
+      const rollupIds = ROLLUP_MAP[test.id];
+      if (rollupIds) {
         athletes.forEach(a => {
           if (a.type === 'adult') return;
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
@@ -714,13 +719,12 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
           const g = (a.gender || '').toLowerCase();
           const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
           if (!isMatch) return;
-          const best = getOverheadBestForAthlete(a.id);
+          const best = getRollupBest(a.id, rollupIds);
           if (best === null) return;
           const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: best };
           records[test.id]['hs'].push(entry);
-          const overheadIds = ['press', 'push_press', 'jerk', 'overhead'];
-          const overheadResults = results.filter(r => r.athlete_id === a.id && overheadIds.includes(r.test_id));
-          const firstDate = overheadResults.length > 0 ? overheadResults.sort((x, y) => new Date(x.test_date) - new Date(y.test_date))[0].test_date : null;
+          const rollupResults = results.filter(r => r.athlete_id === a.id && rollupIds.includes(r.test_id));
+          const firstDate = rollupResults.length > 0 ? rollupResults.sort((x, y) => new Date(x.test_date) - new Date(y.test_date))[0].test_date : null;
           const age = firstDate ? getAgeAtTest(a.birthday, firstDate) : null;
           if (age !== null && age < 15) records[test.id]['ms'].push(entry);
         });
@@ -753,14 +757,13 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
   const buildAdultRecords = (test, genderFilter) => {
     const adultAthletes = athletes.filter(a => a.type === 'adult');
     const entries = [];
-    const isOverhead = test.id === '_overhead';
+    const rollupIds = ROLLUP_MAP[test.id];
     adultAthletes.forEach(a => {
       const g = (a.gender || '').toLowerCase();
       const matches = genderFilter === 'men' ? g !== 'female' : g === 'female';
       if (!matches) return;
       let best = null;
-      if (isOverhead) {
-        const rollupIds = ['press', 'push_press', 'jerk', 'overhead'];
+      if (rollupIds) {
         const vals = results.filter(r => r.athlete_id === a.id && rollupIds.includes(r.test_id)).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
         if (vals.length > 0) best = Math.max(...vals);
       } else {
