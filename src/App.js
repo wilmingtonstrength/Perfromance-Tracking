@@ -89,7 +89,6 @@ const scoreLabel = (score) => {
 
 const calculateAthleteScore = (athleteId, allAthletes, allResults, customTests) => {
   const youthAthletes = allAthletes;
-  // Map TSA keys to actual custom_test IDs in this gym
   const tsaDefs = TSA_TEST_LABELS.map(tsa => {
     const matchNames = tsa.matchNames || [tsa.label];
     if (tsa.key === '_best_squat') {
@@ -239,10 +238,11 @@ function SimpleChart({ data, direction, testDef }) {
 
 /* ===================== LOGIN PAGE ===================== */
 function LoginPage({ onLogin }) {
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState('login'); // login, signup, forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
@@ -262,6 +262,15 @@ function LoginPage({ onLogin }) {
     setLoading(false);
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault(); setError(''); setSuccess(''); setLoading(true);
+    if (!email) { setError('Enter your email address'); setLoading(false); return; }
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    if (err) { setError(err.message); setLoading(false); return; }
+    setSuccess('Password reset link sent! Check your email.');
+    setLoading(false);
+  };
+
   const iStyle = { width: '100%', padding: '14px 18px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10, color: '#fff', fontSize: 16 };
 
   return (
@@ -274,26 +283,51 @@ function LoginPage({ onLogin }) {
           <div style={{ fontSize: 13, color: '#00d4ff', letterSpacing: 3, textTransform: 'uppercase', marginTop: 4 }}>Performance Tracking</div>
         </div>
 
-        <div style={{ display: 'flex', gap: 0, marginBottom: 28, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-          {['login', 'signup'].map(m => (
-            <button key={m} onClick={() => { setMode(m); setError(''); }} style={{ flex: 1, padding: '12px', background: mode === m ? 'rgba(0,212,255,0.15)' : 'transparent', border: 'none', borderBottom: mode === m ? '2px solid #00d4ff' : '2px solid transparent', color: mode === m ? '#00d4ff' : '#666', fontWeight: mode === m ? 700 : 400, cursor: 'pointer', fontSize: 15, textTransform: 'capitalize' }}>{m === 'login' ? 'Log In' : 'Sign Up'}</button>
-          ))}
-        </div>
+        {mode !== 'forgot' && (
+          <div style={{ display: 'flex', gap: 0, marginBottom: 28, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+            {['login', 'signup'].map(m => (
+              <button key={m} onClick={() => { setMode(m); setError(''); setSuccess(''); }} style={{ flex: 1, padding: '12px', background: mode === m ? 'rgba(0,212,255,0.15)' : 'transparent', border: 'none', borderBottom: mode === m ? '2px solid #00d4ff' : '2px solid transparent', color: mode === m ? '#00d4ff' : '#666', fontWeight: mode === m ? 700 : 400, cursor: 'pointer', fontSize: 15, textTransform: 'capitalize' }}>{m === 'login' ? 'Log In' : 'Sign Up'}</button>
+            ))}
+          </div>
+        )}
 
-        <form onSubmit={mode === 'login' ? handleLogin : handleSignup}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#888' }}>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="coach@school.edu" style={iStyle} />
-          </div>
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#888' }}>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" style={iStyle} />
-          </div>
-          {error && <div style={{ padding: '12px 16px', background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 8, color: '#ff6666', fontSize: 14, marginBottom: 16 }}>{error}</div>}
-          <button type="submit" disabled={loading} style={{ width: '100%', padding: '16px', background: loading ? '#555' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 18, fontWeight: 800, cursor: loading ? 'wait' : 'pointer', letterSpacing: 1 }}>
-            {loading ? 'Please wait...' : mode === 'login' ? 'Log In' : 'Create Account'}
-          </button>
-        </form>
+        {mode === 'forgot' ? (
+          <form onSubmit={handleForgotPassword}>
+            <h3 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>Reset Password</h3>
+            <p style={{ color: '#888', fontSize: 14, marginBottom: 24 }}>Enter your email and we'll send you a reset link.</p>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#888' }}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="coach@school.edu" style={iStyle} />
+            </div>
+            {error && <div style={{ padding: '12px 16px', background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 8, color: '#ff6666', fontSize: 14, marginBottom: 16 }}>{error}</div>}
+            {success && <div style={{ padding: '12px 16px', background: 'rgba(0,255,136,0.1)', border: '1px solid rgba(0,255,136,0.3)', borderRadius: 8, color: '#00ff88', fontSize: 14, marginBottom: 16 }}>{success}</div>}
+            <button type="submit" disabled={loading} style={{ width: '100%', padding: '16px', background: loading ? '#555' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 18, fontWeight: 800, cursor: loading ? 'wait' : 'pointer', letterSpacing: 1 }}>
+              {loading ? 'Sending...' : 'Send Reset Link'}
+            </button>
+            <button type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); }} style={{ width: '100%', marginTop: 12, padding: '12px', background: 'transparent', border: 'none', color: '#00d4ff', cursor: 'pointer', fontSize: 14 }}>Back to Log In</button>
+          </form>
+        ) : (
+          <form onSubmit={mode === 'login' ? handleLogin : handleSignup}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#888' }}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="coach@school.edu" style={iStyle} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#888' }}>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" style={iStyle} />
+            </div>
+            {mode === 'login' && (
+              <div style={{ textAlign: 'right', marginBottom: 20 }}>
+                <button type="button" onClick={() => { setMode('forgot'); setError(''); setSuccess(''); }} style={{ background: 'none', border: 'none', color: '#00d4ff', cursor: 'pointer', fontSize: 13, padding: 0 }}>Forgot password?</button>
+              </div>
+            )}
+            {mode === 'signup' && <div style={{ height: 8 }} />}
+            {error && <div style={{ padding: '12px 16px', background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 8, color: '#ff6666', fontSize: 14, marginBottom: 16 }}>{error}</div>}
+            <button type="submit" disabled={loading} style={{ width: '100%', padding: '16px', background: loading ? '#555' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 18, fontWeight: 800, cursor: loading ? 'wait' : 'pointer', letterSpacing: 1 }}>
+              {loading ? 'Please wait...' : mode === 'login' ? 'Log In' : 'Create Account'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -321,7 +355,6 @@ function OnboardingPage({ user, onComplete }) {
     setSaving(true);
     const slug = gymName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-    // Create the gym
     const { data: gymData, error: gymErr } = await supabase.from('gyms').insert([{
       name: gymName, slug, primary_color: primaryColor, logo_letter: gymName.charAt(0).toUpperCase()
     }]).select();
@@ -329,11 +362,9 @@ function OnboardingPage({ user, onComplete }) {
     if (gymErr || !gymData) { alert('Error creating gym: ' + (gymErr?.message || 'Unknown')); setSaving(false); return; }
     const gymId = gymData[0].id;
 
-    // Link user as admin
     const { error: linkErr } = await supabase.from('gym_users').insert([{ user_id: user.id, gym_id: gymId, role: 'admin' }]);
     if (linkErr) { alert('Error linking account: ' + linkErr.message); setSaving(false); return; }
 
-    // Copy selected presets into custom_tests
     const selectedTests = presets.filter(p => selectedPresets.includes(p.id));
     if (selectedTests.length > 0) {
       const testsToInsert = selectedTests.map((p, i) => ({
@@ -375,13 +406,15 @@ function OnboardingPage({ user, onComplete }) {
         {step === 1 && (
           <div>
             <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 8 }}>Name your program</h2>
-            <p style={{ color: '#888', marginBottom: 32 }}>This is what your athletes and coaches will see.</p>
+            <p style={{ color: '#888', marginBottom: 12 }}>This is what your athletes and coaches will see at the top of the app.</p>
             <div style={{ marginBottom: 24 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Program / Gym Name</label>
               <input type="text" value={gymName} onChange={(e) => setGymName(e.target.value)} placeholder="e.g. North Brunswick Football" style={iStyle} />
+              <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>Use your school, gym, or program name. You can change this later in Settings.</div>
             </div>
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Brand Color</label>
+              <p style={{ color: '#666', fontSize: 13, marginBottom: 12, marginTop: 0 }}>This color will be used for buttons, headers, and accents throughout your app.</p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {['#00d4ff', '#e63946', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#3498db', '#ff6b35', '#c0392b', '#27ae60', '#2980b9', '#8e44ad', '#d35400', '#16a085', '#f1c40f', '#e84393', '#6c5ce7', '#00b894', '#fdcb6e', '#e17055', '#0984e3', '#636e72', '#b71540', '#0c2461', '#079992'].map(c => (
                   <div key={c} onClick={() => setPrimaryColor(c)} style={{ width: 44, height: 44, borderRadius: 10, background: c, cursor: 'pointer', border: primaryColor === c ? '3px solid #fff' : '3px solid transparent', transition: 'all 0.15s' }} />
@@ -395,7 +428,8 @@ function OnboardingPage({ user, onComplete }) {
         {step === 2 && (
           <div>
             <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 8 }}>Pick your tests</h2>
-            <p style={{ color: '#888', marginBottom: 8 }}>Select the tests you use. You can always add or change these later.</p>
+            <p style={{ color: '#888', marginBottom: 4 }}>Select the performance tests you run with your athletes. Popular tests are pre-selected.</p>
+            <p style={{ color: '#666', fontSize: 13, marginBottom: 8, marginTop: 0 }}>Don't see what you need? You can add custom tests anytime in Settings after setup.</p>
             <p style={{ color: '#00d4ff', fontSize: 14, marginBottom: 24 }}>{selectedPresets.length} tests selected</p>
 
             {categoryOrder.map(cat => grouped[cat] ? (
@@ -427,12 +461,11 @@ function OnboardingPage({ user, onComplete }) {
 
 /* ===================== MAIN APP ===================== */
 export default function App() {
-  const [authState, setAuthState] = useState('loading'); // loading, login, onboarding, app
+  const [authState, setAuthState] = useState('loading');
   const [user, setUser] = useState(null);
   const [gym, setGym] = useState(null);
   const [gymId, setGymId] = useState(null);
 
-  // App state
   const [page, setPage] = useState('entry');
   const [athletes, setAthletes] = useState([]);
   const [results, setResults] = useState([]);
@@ -440,13 +473,11 @@ export default function App() {
   const [notification, setNotification] = useState(null);
   const [appLoading, setAppLoading] = useState(true);
 
-  // Check auth on mount
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { setAuthState('login'); return; }
       setUser(session.user);
-      // Check if user has a gym
       const { data: gu } = await supabase.from('gym_users').select('gym_id').eq('user_id', session.user.id).limit(1);
       if (!gu || gu.length === 0) { setAuthState('onboarding'); return; }
       setGymId(gu[0].gym_id);
@@ -477,7 +508,6 @@ export default function App() {
     setAuthState('login'); setUser(null); setGym(null); setGymId(null);
   };
 
-  // Load gym data when gymId is set
   useEffect(() => {
     if (!gymId || authState !== 'app') return;
     const loadData = async () => {
@@ -491,7 +521,6 @@ export default function App() {
       if (testsRes.data) setCustomTests(testsRes.data);
       if (athletesRes.data) setAthletes(athletesRes.data);
 
-      // Load results
       let allResults = [];
       let from = 0;
       while (true) {
@@ -506,13 +535,11 @@ export default function App() {
     loadData();
   }, [gymId, authState]);
 
-  // Auth routing
   if (authState === 'loading') return <div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d4ff', fontSize: 20, fontFamily: "'Archivo', sans-serif" }}>Loading...</div>;
   if (authState === 'login') return <LoginPage onLogin={handleLogin} />;
   if (authState === 'onboarding') return <OnboardingPage user={user} onComplete={handleOnboardingComplete} />;
   if (appLoading) return <div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d4ff', fontSize: 20, fontFamily: "'Archivo', sans-serif" }}>Loading your program...</div>;
 
-  // Helpers scoped to this gym
   const getTestById = (id) => customTests.find(t => t.id === id) || null;
   const showNotification = (message, type = 'success') => { setNotification({ message, type }); setTimeout(() => setNotification(null), 4000); };
 
@@ -1154,6 +1181,41 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
   const [formCategory, setFormCategory] = useState('speed');
   const [formBoard, setFormBoard] = useState(true);
 
+  // Gym settings state
+  const [editingGym, setEditingGym] = useState(false);
+  const [gymFormName, setGymFormName] = useState('');
+  const [gymFormColor, setGymFormColor] = useState('');
+  const [gymFormLetter, setGymFormLetter] = useState('');
+  const [savingGym, setSavingGym] = useState(false);
+
+  const startEditGym = () => {
+    setGymFormName(gym?.name || '');
+    setGymFormColor(gym?.primary_color || '#00d4ff');
+    setGymFormLetter(gym?.logo_letter || '');
+    setEditingGym(true);
+  };
+
+  const saveGym = async () => {
+    if (!gymFormName.trim()) { alert('Gym name is required'); return; }
+    setSavingGym(true);
+    const updates = {
+      name: gymFormName.trim(),
+      primary_color: gymFormColor,
+      logo_letter: gymFormLetter || gymFormName.charAt(0).toUpperCase()
+    };
+    const { error } = await supabase.from('gyms').update(updates).eq('id', gymId);
+    if (!error) {
+      setGym({ ...gym, ...updates });
+      showNotification('Gym settings updated!');
+      setEditingGym(false);
+    } else {
+      showNotification('Error: ' + error.message, 'error');
+    }
+    setSavingGym(false);
+  };
+
+  const colorOptions = ['#00d4ff', '#e63946', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#3498db', '#ff6b35', '#c0392b', '#27ae60', '#2980b9', '#8e44ad', '#d35400', '#16a085', '#f1c40f', '#e84393', '#6c5ce7', '#00b894', '#fdcb6e', '#e17055', '#0984e3', '#636e72', '#b71540', '#0c2461', '#079992'];
+
   const resetForm = () => { setFormName(''); setFormUnit('time'); setFormDirection('lower'); setFormCategory('speed'); setFormBoard(true); };
 
   const startEdit = (t) => { setEditingTest(t.id); setFormName(t.name); setFormUnit(t.unit); setFormDirection(t.direction); setFormCategory(t.category); setFormBoard(t.show_on_record_board); setShowAdd(false); };
@@ -1191,6 +1253,47 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
           <p style={{ color: '#888' }}>{gym?.name} · {customTests.length} tests · {user?.email}</p>
         </div>
         <button onClick={() => { setShowAdd(true); setEditingTest(null); resetForm(); }} style={{ padding: '14px 28px', background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add Test</button>
+      </div>
+
+      {/* ===== GYM SETTINGS SECTION ===== */}
+      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 28, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editingGym ? 20 : 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ width: 48, height: 48, background: `linear-gradient(135deg, ${gym?.primary_color || accentColor} 0%, ${gym?.primary_color || accentColor}cc 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: '#0a1628' }}>{gym?.logo_letter || 'K'}</div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{gym?.name || 'Your Gym'}</div>
+              <div style={{ fontSize: 13, color: '#666' }}>Brand color: <span style={{ color: gym?.primary_color || accentColor }}>{gym?.primary_color || accentColor}</span></div>
+            </div>
+          </div>
+          {!editingGym && <button onClick={startEditGym} style={{ padding: '8px 20px', background: `${accentColor}22`, border: `1px solid ${accentColor}44`, borderRadius: 6, color: accentColor, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Edit Gym</button>}
+        </div>
+        {editingGym && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888' }}>Gym / Program Name</label>
+                <input type="text" value={gymFormName} onChange={(e) => setGymFormName(e.target.value)} style={iStyle} />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888' }}>Logo Letter</label>
+                <input type="text" maxLength={2} value={gymFormLetter} onChange={(e) => setGymFormLetter(e.target.value.toUpperCase())} placeholder={gymFormName ? gymFormName.charAt(0).toUpperCase() : 'K'} style={{ ...iStyle, width: 80, textAlign: 'center', fontSize: 20, fontWeight: 700 }} />
+                <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Shown in the header icon</div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 12, color: '#888' }}>Brand Color</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {colorOptions.map(c => (
+                  <div key={c} onClick={() => setGymFormColor(c)} style={{ width: 36, height: 36, borderRadius: 8, background: c, cursor: 'pointer', border: gymFormColor === c ? '3px solid #fff' : '3px solid transparent', transition: 'all 0.15s' }} />
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={saveGym} disabled={savingGym} style={{ padding: '10px 24px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: savingGym ? 'wait' : 'pointer' }}>{savingGym ? 'Saving...' : 'Save'}</button>
+              <button onClick={() => setEditingGym(false)} style={{ padding: '10px 24px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {(showAdd || editingTest) && (
