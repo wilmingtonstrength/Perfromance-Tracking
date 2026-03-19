@@ -668,7 +668,7 @@ export default function App() {
 
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <KMTestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} accentColor={accentColor} />}
-        {page === 'athletes' && <KMAthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} />}
+        {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
         {page === 'settings' && <KMSettingsPage gym={gym} setGym={setGym} customTests={customTests} setCustomTests={setCustomTests} gymId={gymId} showNotification={showNotification} user={user} accentColor={accentColor} />}
@@ -771,6 +771,11 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
             </div>
           </div>
         ))}
+        {selectedTests.some(tid => { const t = getTestById(tid); return t && (t.name === 'Max Velocity' || (t.display_unit === 'MPH' && t.conversion_formula)); }) && (
+          <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(0,212,255,0.08)', borderRadius: 8, border: '1px solid rgba(0,212,255,0.2)', fontSize: 13, color: '#aaa' }}>
+            <span style={{ color: accentColor, fontWeight: 600 }}>Max Velocity</span> — MPH calculated from a 10-yard split, typically with a 30-yard lead-in. Most coaches use the last 10 of a 40 for this. Enter the split time in seconds.
+          </div>
+        )}
       </div>
       {selectedTests.length > 0 && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -820,7 +825,7 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
 }
 
 /* ===================== ATHLETES (COMBINED PROFILE) ===================== */
-function KMAthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getTestById, customTests, getTestsByCategory, deleteResult, updateResult, accentColor }) {
+function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, deleteAthlete, results, setResults, logResults, getPR, getTestById, customTests, getTestsByCategory, deleteResult, updateResult, accentColor, gymId, showNotification }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
@@ -833,6 +838,111 @@ function KMAthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, re
   const [historyFilter, setHistoryFilter] = useState('');
   const [editingResult, setEditingResult] = useState(null);
   const [editDate, setEditDate] = useState(''); const [editValue, setEditValue] = useState('');
+
+  // CSV Import state
+  const [showImport, setShowImport] = useState(false);
+  const [importStep, setImportStep] = useState(1); // 1=select tests, 2=upload, 3=preview, 4=done
+  const [importTests, setImportTests] = useState([]);
+  const [importData, setImportData] = useState([]);
+  const [importResults, setImportResults] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const toggleImportTest = (id) => {
+    setImportTests(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const generateTemplate = () => {
+    const headers = ['first_name', 'last_name', 'gender', 'birthday', 'sport'];
+    importTests.forEach(tid => {
+      const t = getTestById(tid);
+      if (t) headers.push(t.name);
+    });
+    const csv = headers.join(',') + '\n' + headers.map((h, i) => i === 0 ? 'John' : i === 1 ? 'Smith' : i === 2 ? 'Male' : i === 3 ? '2008-05-15' : i === 4 ? 'Football' : '').join(',') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'athlete_import_template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCSV = (text) => {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+    return lines.slice(1).map(line => {
+      const vals = [];
+      let current = ''; let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') { inQuotes = !inQuotes; }
+        else if (line[i] === ',' && !inQuotes) { vals.push(current.trim()); current = ''; }
+        else { current += line[i]; }
+      }
+      vals.push(current.trim());
+      const row = {};
+      headers.forEach((h, i) => { row[h] = vals[i] || ''; });
+      return row;
+    }).filter(row => row.first_name || row.last_name);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const parsed = parseCSV(ev.target.result);
+      if (parsed.length === 0) { alert('No valid rows found. Make sure first_name and last_name columns exist.'); return; }
+      setImportData(parsed);
+      setImportStep(3);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    let athletesAdded = 0; let resultsLogged = 0;
+    const testDate = new Date().toISOString().split('T')[0];
+    const newAthletes = [];
+    const newResults = [];
+
+    for (const row of importData) {
+      if (!row.first_name && !row.last_name) continue;
+      // Insert athlete
+      const { data: ath, error: athErr } = await supabase.from('athletes').insert([{
+        gym_id: gymId, first_name: row.first_name || '', last_name: row.last_name || '',
+        date_of_birth: row.birthday || null, gender: row.gender || null, sport: row.sport || null
+      }]).select();
+      if (athErr || !ath) continue;
+      newAthletes.push(ath[0]);
+      athletesAdded++;
+
+      // Insert test results for this athlete
+      for (const tid of importTests) {
+        const t = getTestById(tid);
+        if (!t) continue;
+        const rawVal = row[t.name];
+        if (!rawVal || rawVal === '') continue;
+        let v = parseFloat(rawVal);
+        if (isNaN(v)) continue;
+        if (t.conversion_formula) v = applyConversion(t, v);
+        const { data: resData } = await supabase.from('test_results').insert([{
+          gym_id: gymId, athlete_id: ath[0].id, custom_test_id: tid,
+          test_type: t.name, value: v, tested_at: testDate, is_pr: true
+        }]).select();
+        if (resData) { newResults.push(resData[0]); resultsLogged++; }
+      }
+    }
+
+    // Update local state
+    setAthletes(prev => [...prev, ...newAthletes].sort((a, b) => a.first_name.localeCompare(b.first_name)));
+    setResults(prev => [...prev, ...newResults]);
+    setImportResults({ athletes: athletesAdded, results: resultsLogged });
+    setImportStep(4);
+    setImporting(false);
+    showNotification(athletesAdded + ' athletes imported!' + (resultsLogged > 0 ? ' ' + resultsLogged + ' results logged.' : ''));
+  };
+
+  const resetImport = () => { setShowImport(false); setImportStep(1); setImportTests([]); setImportData([]); setImportResults(null); };
 
   const athlete = athletes.find(a => a.id === selectedAthlete);
   const testSet = getTestsByCategory();
@@ -854,8 +964,116 @@ function KMAthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, re
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>Athletes</h1>
-        <button onClick={() => setShowAdd(!showAdd)} style={{ padding: '14px 28px', background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add Athlete</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => { setShowImport(true); setImportStep(1); }} style={{ padding: '14px 28px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${accentColor}66`, borderRadius: 8, color: accentColor, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Import CSV</button>
+          <button onClick={() => setShowAdd(!showAdd)} style={{ padding: '14px 28px', background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+ Add Athlete</button>
+        </div>
       </div>
+
+      {/* CSV IMPORT FLOW */}
+      {showImport && (
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${accentColor}44` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ margin: 0, fontFamily: "'Archivo Black', sans-serif", fontSize: 20 }}>Import Athletes</h3>
+            <button onClick={resetImport} style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+          </div>
+
+          {/* Step indicator */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+            {['Select Tests', 'Upload CSV', 'Preview', 'Done'].map((label, i) => (
+              <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ height: 4, borderRadius: 2, background: importStep > i ? accentColor : 'rgba(255,255,255,0.1)', marginBottom: 6 }} />
+                <div style={{ fontSize: 11, color: importStep > i ? accentColor : '#555' }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Step 1: Select tests to include */}
+          {importStep === 1 && (
+            <div>
+              <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 16 }}>Do you have existing test data to include? Select any tests you want columns for in the CSV. If you just want to import a roster with no test data, skip this step.</p>
+              {Object.entries(getTestsByCategory()).map(([cat, tests]) => (
+                <div key={cat} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>{cat}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {tests.map(t => { const active = importTests.includes(t.id); return (
+                      <button key={t.id} onClick={() => toggleImportTest(t.id)} style={{ padding: '8px 16px', background: active ? `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: active ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: active ? '#0a1628' : '#aaa', fontWeight: active ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>{t.name}</button>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                <button onClick={() => setImportStep(2)} style={{ flex: 1, padding: '14px', background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+                  {importTests.length > 0 ? 'Next: Upload CSV' : 'Skip: Import Roster Only'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Download template & upload */}
+          {importStep === 2 && (
+            <div>
+              <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 16 }}>Download the template, fill it in with your athletes{importTests.length > 0 ? ' and test data' : ''}, then upload the completed file. Gender, birthday, and sport are optional.</p>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+                <button onClick={generateTemplate} style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.1)', border: `1px solid ${accentColor}44`, borderRadius: 8, color: accentColor, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>Download CSV Template</button>
+              </div>
+              <div style={{ padding: 24, border: '2px dashed rgba(255,255,255,0.2)', borderRadius: 12, textAlign: 'center', cursor: 'pointer' }} onClick={() => fileInputRef.current?.click()}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                <div style={{ color: '#aaa', fontSize: 14 }}>Click to upload your CSV file</div>
+                <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>Accepts .csv files</div>
+              </div>
+              <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+              <button onClick={() => setImportStep(1)} style={{ marginTop: 12, padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13 }}>← Back</button>
+            </div>
+          )}
+
+          {/* Step 3: Preview */}
+          {importStep === 3 && (
+            <div>
+              <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 16 }}>Found <span style={{ color: accentColor, fontWeight: 700 }}>{importData.length}</span> athletes. Review and confirm.</p>
+              <div style={{ maxHeight: 300, overflowY: 'auto', background: 'rgba(0,0,0,0.2)', borderRadius: 8, marginBottom: 16 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Name</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor }}>Gender</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor }}>Sport</th>
+                      {importTests.map(tid => { const t = getTestById(tid); return <th key={tid} style={{ padding: '10px 12px', textAlign: 'center', fontSize: 12, color: accentColor }}>{t?.name}</th>; })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importData.slice(0, 20).map((row, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '8px 12px', fontSize: 14, color: '#fff' }}>{row.first_name} {row.last_name}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 13, color: '#888' }}>{row.gender || '-'}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 13, color: '#888' }}>{row.sport || '-'}</td>
+                        {importTests.map(tid => { const t = getTestById(tid); const val = t ? row[t.name] : ''; return <td key={tid} style={{ padding: '8px 12px', textAlign: 'center', fontSize: 13, color: val ? '#00ff88' : '#555' }}>{val || '-'}</td>; })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {importData.length > 20 && <div style={{ padding: '8px 12px', color: '#666', fontSize: 12, textAlign: 'center' }}>...and {importData.length - 20} more</div>}
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button onClick={() => { setImportStep(2); setImportData([]); }} style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>← Back</button>
+                <button onClick={handleImport} disabled={importing} style={{ flex: 1, padding: '14px', background: importing ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: importing ? 'wait' : 'pointer' }}>
+                  {importing ? 'Importing...' : 'Import ' + importData.length + ' Athletes'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Done */}
+          {importStep === 4 && importResults && (
+            <div style={{ textAlign: 'center', padding: 24 }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+              <h3 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: '#00ff88', marginBottom: 8 }}>Import Complete</h3>
+              <p style={{ color: '#888', fontSize: 16, marginBottom: 24 }}>{importResults.athletes} athletes added{importResults.results > 0 ? ', ' + importResults.results + ' test results logged' : ''}</p>
+              <button onClick={resetImport} style={{ padding: '14px 32px', background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Done</button>
+            </div>
+          )}
+        </div>
+      )}
       {showAdd && (
         <form onSubmit={handleAdd} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${accentColor}44` }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
