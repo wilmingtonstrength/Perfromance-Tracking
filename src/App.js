@@ -643,7 +643,11 @@ export default function App() {
       <header style={{ background: 'rgba(0,0,0,0.4)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 24px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(10px)' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 44, height: 44, background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 22, color: '#0a1628' }}>{gymLetter}</div>
+            {gym?.logo_url ? (
+              <img src={gym.logo_url} alt="Logo" style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'contain', background: 'rgba(255,255,255,0.1)' }} />
+            ) : (
+              <div style={{ width: 44, height: 44, background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 22, color: '#0a1628' }}>{gymLetter}</div>
+            )}
             <div>
               <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 20, letterSpacing: 1 }}>{gymName.toUpperCase()}</div>
               <div style={{ fontSize: 11, color: accentColor, letterSpacing: 2, textTransform: 'uppercase' }}>Powered by Kaimetric</div>
@@ -1404,12 +1408,43 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
   const [gymFormName, setGymFormName] = useState('');
   const [gymFormColor, setGymFormColor] = useState('');
   const [gymFormLetter, setGymFormLetter] = useState('');
+  const [gymFormLogoUrl, setGymFormLogoUrl] = useState('');
   const [savingGym, setSavingGym] = useState(false);
+  const logoFileRef = useRef(null);
+
+  const handleLogoFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml'].includes(file.type)) { alert('Please upload a PNG, JPG, GIF, or SVG'); return; }
+    if (file.size > 500000) { alert('File must be under 500KB'); return; }
+    if (file.type === 'image/svg+xml') {
+      const reader = new FileReader();
+      reader.onload = (ev) => setGymFormLogoUrl(ev.target.result);
+      reader.readAsDataURL(file);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const max = 200;
+        let w = img.width, h = img.height;
+        if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        setGymFormLogoUrl(canvas.toDataURL('image/png', 0.9));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const startEditGym = () => {
     setGymFormName(gym?.name || '');
     setGymFormColor(gym?.primary_color || '#00d4ff');
     setGymFormLetter(gym?.logo_letter || '');
+    setGymFormLogoUrl(gym?.logo_url || '');
     setEditingGym(true);
   };
 
@@ -1419,7 +1454,8 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
     const updates = {
       name: gymFormName.trim(),
       primary_color: gymFormColor,
-      logo_letter: gymFormLetter || gymFormName.charAt(0).toUpperCase()
+      logo_letter: gymFormLetter || gymFormName.charAt(0).toUpperCase(),
+      logo_url: gymFormLogoUrl || null
     };
     const { error } = await supabase.from('gyms').update(updates).eq('id', gymId);
     if (!error) {
@@ -1477,7 +1513,11 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 28, border: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editingGym ? 20 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 48, height: 48, background: `linear-gradient(135deg, ${gym?.primary_color || accentColor} 0%, ${gym?.primary_color || accentColor}cc 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: '#0a1628' }}>{gym?.logo_letter || 'K'}</div>
+            {gym?.logo_url ? (
+              <img src={gym.logo_url} alt="Logo" style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'contain', background: 'rgba(255,255,255,0.1)' }} />
+            ) : (
+              <div style={{ width: 48, height: 48, background: `linear-gradient(135deg, ${gym?.primary_color || accentColor} 0%, ${gym?.primary_color || accentColor}cc 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: '#0a1628' }}>{gym?.logo_letter || 'K'}</div>
+            )}
             <div>
               <div style={{ fontWeight: 700, fontSize: 18 }}>{gym?.name || 'Your Gym'}</div>
               <div style={{ fontSize: 13, color: '#666' }}>Brand color: <span style={{ color: gym?.primary_color || accentColor }}>{gym?.primary_color || accentColor}</span></div>
@@ -1495,7 +1535,25 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
               <div>
                 <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888' }}>Logo Letter</label>
                 <input type="text" maxLength={2} value={gymFormLetter} onChange={(e) => setGymFormLetter(e.target.value.toUpperCase())} placeholder={gymFormName ? gymFormName.charAt(0).toUpperCase() : 'K'} style={{ ...iStyle, width: 80, textAlign: 'center', fontSize: 20, fontWeight: 700 }} />
-                <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Shown in the header icon</div>
+                <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Fallback if no logo uploaded</div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 12, color: '#888' }}>Logo Image</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {gymFormLogoUrl ? (
+                  <div style={{ position: 'relative' }}>
+                    <img src={gymFormLogoUrl} alt="Logo" style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'contain', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }} />
+                    <button onClick={() => setGymFormLogoUrl('')} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, background: '#ff4444', border: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>×</button>
+                  </div>
+                ) : (
+                  <div style={{ width: 64, height: 64, borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '2px dashed rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 11, textAlign: 'center' }}>No logo</div>
+                )}
+                <div>
+                  <input ref={logoFileRef} type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml" onChange={handleLogoFile} style={{ display: 'none' }} />
+                  <button onClick={() => logoFileRef.current?.click()} style={{ padding: '8px 20px', background: `${accentColor}22`, border: `1px solid ${accentColor}44`, borderRadius: 6, color: accentColor, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>{gymFormLogoUrl ? 'Change Logo' : 'Upload Logo'}</button>
+                  <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>PNG, JPG, GIF, or SVG · Max 500KB</div>
+                </div>
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
