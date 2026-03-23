@@ -362,7 +362,7 @@ function OnboardingPage({ user, onComplete }) {
     if (gymErr || !gymData) { alert('Error creating gym: ' + (gymErr?.message || 'Unknown')); setSaving(false); return; }
     const gymId = gymData[0].id;
 
-    const { error: linkErr } = await supabase.from('gym_users').insert([{ user_id: user.id, gym_id: gymId, role: 'admin' }]);
+    const { error: linkErr } = await supabase.from('gym_users').insert([{ user_id: user.id, gym_id: gymId, role: 'admin', email: user.email }]);
     if (linkErr) { alert('Error linking account: ' + linkErr.message); setSaving(false); return; }
 
     const selectedTests = presets.filter(p => selectedPresets.includes(p.id));
@@ -629,12 +629,14 @@ export default function App() {
   const gymLetter = gym?.logo_letter || 'K';
   const gymName = gym?.name || 'Kaimetric';
 
+  const isAdmin = user?.email === 'matt@wilmingtonstrength.com';
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
     { id: 'recentprs', label: '🔥 Recent PRs' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'settings', label: '⚙️ Settings' },
+    ...(isAdmin ? [{ id: 'admin', label: '🔒 Admin' }] : []),
   ];
 
   return (
@@ -676,6 +678,7 @@ export default function App() {
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
         {page === 'settings' && <KMSettingsPage gym={gym} setGym={setGym} customTests={customTests} setCustomTests={setCustomTests} gymId={gymId} showNotification={showNotification} user={user} accentColor={accentColor} />}
+        {page === 'admin' && isAdmin && <KMAdminPage accentColor={accentColor} />}
       </main>
 
       <style>{`
@@ -1610,6 +1613,71 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ===================== ADMIN PAGE ===================== */
+function KMAdminPage({ accentColor }) {
+  const [gyms, setGyms] = useState([]);
+  const [gymUsers, setGymUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data: g } = await supabase.from('gyms').select('*').order('created_at', { ascending: false });
+      const { data: gu } = await supabase.from('gym_users').select('*');
+      if (g) setGyms(g);
+      if (gu) setGymUsers(gu);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const getOwnerEmail = (gymId) => {
+    const owner = gymUsers.find(gu => gu.gym_id === gymId && gu.role === 'admin');
+    return owner?.email || '—';
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  };
+
+  if (loading) return (<div style={{ textAlign: 'center', padding: 48, color: '#888' }}>Loading admin data...</div>);
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Admin Dashboard</h1>
+      <p style={{ color: '#888', marginBottom: 32 }}>All Kaimetric gym signups</p>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 28 }}>
+        <div style={{ padding: '20px 28px', background: `${accentColor}15`, borderRadius: 12, border: `1px solid ${accentColor}30` }}>
+          <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: accentColor }}>{gyms.length}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Gyms</div>
+        </div>
+      </div>
+
+      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 16, padding: '14px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Gym Name</div>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Owner Email</div>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Signed Up</div>
+        </div>
+        {gyms.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: '#666' }}>No gyms yet.</div>
+        ) : gyms.map(g => (
+          <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 16, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</div>
+              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{g.slug}</div>
+            </div>
+            <div style={{ fontSize: 14, color: '#aaa' }}>{getOwnerEmail(g.id)}</div>
+            <div style={{ fontSize: 13, color: '#666' }}>{formatDate(g.created_at)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
