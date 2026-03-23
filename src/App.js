@@ -629,7 +629,7 @@ export default function App() {
   const gymLetter = gym?.logo_letter || 'K';
   const gymName = gym?.name || 'Kaimetric';
 
-  const isAdmin = user?.email === 'matt@wilmingtonstrength.com';
+  const isAdmin = user?.email === 'mattsecrest58@gmail.com';
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
