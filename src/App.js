@@ -360,8 +360,8 @@ export default function App() {
       </header>
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} getTestsForType={getTestsForType} />}
-        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} />}
+        {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
+        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} />}
@@ -374,7 +374,7 @@ export default function App() {
 }
 
 /* ===================== TEST ENTRY PAGE ===================== */
-function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForType }) {
+function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [useKg, setUseKg] = useState(false);
@@ -494,7 +494,7 @@ function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForTy
 }
 
 /* ===================== COMBINED ATHLETES PAGE ===================== */
-function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getTestById, getTestsForType, testDefs, deleteResult, updateResult }) {
+function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
