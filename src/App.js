@@ -342,6 +342,7 @@ export default function App() {
     { id: 'jumpcalc', label: '📏 Jump Calc' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'testsettings', label: '⚙️ Tests' },
+    { id: 'progressreports', label: '📋 Reports' },
   ];
 
   return (
@@ -367,6 +368,7 @@ export default function App() {
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
+        {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -1169,6 +1171,270 @@ function TestSettingsPage({ testDefs, setTestDefs, showNotification }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ===================== PROGRESS REPORTS PAGE ===================== */
+const TEST_DESCRIPTIONS = {
+  '5_10_fly': 'acceleration (how quickly they get up to speed)',
+  'max_velocity': 'top-end speed',
+  '5_0_5': 'agility (ability to change direction quickly)',
+  '5_10_5': 'change of direction speed',
+  'vertical_jump': 'lower body explosive power',
+  'broad_jump': 'horizontal power and athleticism',
+  'approach_jump': 'approach jump (combines speed + power)',
+  'rsi': 'reactive strength (how springy and elastic they are)',
+  'clean': 'total body strength and power',
+  'back_squat': 'lower body maximal strength',
+  'front_squat': 'lower body and core strength',
+  'press': 'upper body pressing strength',
+  'push_press': 'overhead power',
+  'jerk': 'overhead explosive strength',
+  'bench_press': 'upper body strength',
+  'sl_rsi_left': 'single-leg reactive strength (left)',
+  'sl_rsi_right': 'single-leg reactive strength (right)',
+};
+
+function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [selectedAthlete, setSelectedAthlete] = useState(null);
+  const [sentReports, setSentReports] = useState([]);
+  const [copied, setCopied] = useState(false);
+  const [minPRs, setMinPRs] = useState(5);
+  const [daysBack, setDaysBack] = useState(90);
+
+  const COACH_PIN = '1234';
+
+  useEffect(() => {
+    const loadSent = async () => {
+      const { data } = await supabase.from('progress_reports').select('*').order('sent_at', { ascending: false });
+      if (data) setSentReports(data);
+    };
+    if (unlocked) loadSent();
+  }, [unlocked]);
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+  const getRecentPRs = (athleteId) => {
+    const athleteResults = results.filter(r => r.athlete_id === athleteId);
+    const prsByTest = {};
+    athleteResults.forEach(r => {
+      const td = getTestById(r.test_id);
+      if (!td) return;
+      const testResults = athleteResults.filter(ar => ar.test_id === r.test_id).sort((a, b) => new Date(a.test_date) - new Date(b.test_date));
+      if (testResults.length < 2) return;
+      const vals = testResults.map(tr => ({ date: tr.test_date, value: parseFloat(tr.converted_value), raw: parseFloat(tr.raw_value) })).filter(v => !isNaN(v.value));
+      if (vals.length < 2) return;
+      const latest = vals[vals.length - 1];
+      const latestDate = new Date(latest.date);
+      if (latestDate < cutoffDate) return;
+      let bestBefore = null;
+      for (let i = vals.length - 2; i >= 0; i--) {
+        if (bestBefore === null) { bestBefore = vals[i]; continue; }
+        if (td.direction === 'higher' && vals[i].value > bestBefore.value) bestBefore = vals[i];
+        if (td.direction === 'lower' && vals[i].value < bestBefore.value) bestBefore = vals[i];
+      }
+      if (!bestBefore) return;
+      const improved = td.direction === 'higher' ? latest.value > bestBefore.value : latest.value < bestBefore.value;
+      if (!improved) return;
+      const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
+      if (latest.value === best) {
+        prsByTest[r.test_id] = { testId: r.test_id, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: bestBefore.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[r.test_id] || td.name.toLowerCase(), feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: bestBefore.raw, newRaw: latest.raw };
+      }
+    });
+    return Object.values(prsByTest);
+  };
+
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+  const flaggedAthletes = youthAthletes.map(a => {
+    const prs = getRecentPRs(a.id);
+    const lastSent = sentReports.find(sr => sr.athlete_id === a.id);
+    return { athlete: a, prs, lastSent };
+  }).filter(a => a.prs.length >= minPRs).sort((a, b) => b.prs.length - a.prs.length);
+
+  const formatVal = (pr) => {
+    if (pr.feetInches) return formatFeetInches(pr.newValue);
+    if (pr.unit === 'sec') return pr.newValue.toFixed(2) + 's';
+    if (pr.unit === 'MPH') return pr.newValue.toFixed(1) + ' MPH';
+    if (pr.unit === 'inches') return pr.newValue.toFixed(1) + '"';
+    if (pr.unit === 'lbs') return Math.round(pr.newValue) + ' lbs';
+    return pr.newValue.toFixed(1);
+  };
+  const formatOldVal = (pr) => {
+    if (pr.feetInches) return formatFeetInches(pr.oldValue);
+    if (pr.unit === 'sec') return pr.oldValue.toFixed(2) + 's';
+    if (pr.unit === 'MPH') return pr.oldValue.toFixed(1) + ' MPH';
+    if (pr.unit === 'inches') return pr.oldValue.toFixed(1) + '"';
+    if (pr.unit === 'lbs') return Math.round(pr.oldValue) + ' lbs';
+    return pr.oldValue.toFixed(1);
+  };
+  const improvementText = (pr) => {
+    const diff = Math.abs(pr.newValue - pr.oldValue);
+    if (pr.unit === 'sec') return diff.toFixed(2) + 's faster';
+    if (pr.unit === 'MPH') return diff.toFixed(1) + ' MPH faster';
+    if (pr.unit === 'inches') return diff.toFixed(1) + '" higher';
+    if (pr.unit === 'lbs') return Math.round(diff) + ' lbs stronger';
+    if (pr.feetInches) return formatFeetInches(diff) + ' further';
+    return diff.toFixed(1) + ' better';
+  };
+
+  const generateMessage = (athleteData) => {
+    const a = athleteData.athlete;
+    const prs = athleteData.prs;
+    const name = a.first_name;
+    let msg = `Hey! Just wanted to give you a quick progress update on ${name}. Over the last few months ${name} has been putting in great work and it's showing:\n\n`;
+    prs.forEach(pr => {
+      msg += `- ${pr.testName}: improved from ${formatOldVal(pr)} to ${formatVal(pr)} (${improvementText(pr)}) — this represents ${pr.description}\n`;
+    });
+    msg += `\n${name} is making real progress. Keep up the great work!`;
+    return msg;
+  };
+
+  const markAsSent = async (athleteData) => {
+    const msg = generateMessage(athleteData);
+    const { data, error } = await supabase.from('progress_reports').insert([{
+      athlete_id: athleteData.athlete.id,
+      pr_count: athleteData.prs.length,
+      pr_summary: athleteData.prs.map(p => p.testName).join(', '),
+      message_text: msg,
+    }]).select();
+    if (data) {
+      setSentReports([data[0], ...sentReports]);
+      showNotification('Marked as sent!');
+    }
+    if (error) showNotification('Error: ' + error.message, 'error');
+  };
+
+  const copyMessage = (athleteData) => {
+    const msg = generateMessage(athleteData);
+    navigator.clipboard.writeText(msg);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    showNotification('Copied to clipboard!');
+  };
+
+  if (!unlocked) {
+    return (
+      <div style={{ maxWidth: 400, margin: '80px auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+        <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 24, marginBottom: 8 }}>Coach Access</h2>
+        <p style={{ color: '#888', marginBottom: 24 }}>Enter PIN to access progress reports</p>
+        <input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => { setPin(e.target.value); if (e.target.value === COACH_PIN) setUnlocked(true); }} placeholder="Enter PIN" style={{ width: 200, padding: '16px 24px', background: 'rgba(0,0,0,0.3)', border: '2px solid rgba(0,212,255,0.3)', borderRadius: 12, color: '#fff', fontSize: 32, textAlign: 'center', letterSpacing: 12 }} />
+        {pin.length === 4 && pin !== COACH_PIN && <p style={{ color: '#ff6666', marginTop: 12, fontSize: 14 }}>Incorrect PIN</p>}
+      </div>
+    );
+  }
+
+  if (selectedAthlete) {
+    const athleteData = flaggedAthletes.find(a => a.athlete.id === selectedAthlete);
+    if (!athleteData) { setSelectedAthlete(null); return null; }
+    const msg = generateMessage(athleteData);
+    const age = calculateAge(athleteData.athlete.birthday);
+    const wasSent = sentReports.some(sr => sr.athlete_id === selectedAthlete);
+
+    return (
+      <div>
+        <button onClick={() => setSelectedAthlete(null)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, margin: 0 }}>{athleteData.athlete.first_name} {athleteData.athlete.last_name}</h2>
+            <p style={{ color: '#888', margin: '4px 0' }}>{age && `${age} yrs`}{athleteData.athlete.gender && ` · ${athleteData.athlete.gender}`} · {athleteData.prs.length} PRs in last {daysBack} days</p>
+          </div>
+          {wasSent && <span style={{ padding: '6px 14px', background: 'rgba(0,255,136,0.15)', borderRadius: 6, color: '#00ff88', fontSize: 13, fontWeight: 600 }}>Previously sent</span>}
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>PR Improvements</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {athleteData.prs.map(pr => (
+              <div key={pr.testId} style={{ background: 'rgba(0,255,136,0.06)', borderRadius: 10, padding: '16px 20px', border: '1px solid rgba(0,255,136,0.2)' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88', marginBottom: 4 }}>{pr.testName}</div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: '#666', fontSize: 16 }}>{formatOldVal(pr)}</span>
+                  <span style={{ color: '#00ff88', fontSize: 18 }}>→</span>
+                  <span style={{ color: '#00ff88', fontWeight: 800, fontSize: 20 }}>{formatVal(pr)}</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#00ff88', marginTop: 4 }}>{improvementText(pr)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Message to Parent</h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => copyMessage(athleteData)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{copied ? 'Copied!' : 'Copy Text'}</button>
+              <button onClick={() => markAsSent(athleteData)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>Mark as Sent</button>
+            </div>
+          </div>
+          <pre style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 20, color: '#ccc', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordWrap: 'break-word', border: '1px solid rgba(255,255,255,0.1)', margin: 0 }}>{msg}</pre>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Progress Reports</h1>
+          <p style={{ color: '#888' }}>{flaggedAthletes.length} athletes ready for a progress report</p>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ fontSize: 13, color: '#666' }}>Min PRs:</div>
+          {[3, 4, 5, 6].map(n => (<button key={n} onClick={() => setMinPRs(n)} style={{ width: 36, height: 36, background: minPRs === n ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: minPRs === n ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: minPRs === n ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 14, fontWeight: minPRs === n ? 700 : 400 }}>{n}+</button>))}
+          <div style={{ fontSize: 13, color: '#666', marginLeft: 12 }}>Days:</div>
+          {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
+        </div>
+      </div>
+
+      {flaggedAthletes.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes with {minPRs}+ PRs in the last {daysBack} days.</p><p style={{ fontSize: 13 }}>Try lowering the minimum PRs or increasing the time range.</p></div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {flaggedAthletes.map(({ athlete, prs, lastSent }) => {
+            const age = calculateAge(athlete.birthday);
+            const wasSent = !!lastSent;
+            const sentDate = lastSent ? new Date(lastSent.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+            return (
+              <div key={athlete.id} onClick={() => setSelectedAthlete(athlete.id)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: wasSent ? 'rgba(0,255,136,0.03)' : 'rgba(255,255,255,0.03)', borderRadius: 12, border: `1px solid ${wasSent ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.07)'}`, cursor: 'pointer' }}>
+                <div style={{ width: 48, height: 48, borderRadius: 10, background: 'rgba(0,255,136,0.15)', border: '2px solid rgba(0,255,136,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{prs.length}</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{athlete.first_name} {athlete.last_name}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · PRs: {prs.map(p => p.testName).join(', ')}</div>
+                </div>
+                {wasSent ? (
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}><span style={{ fontSize: 12, color: '#00ff88', fontWeight: 600 }}>Sent {sentDate}</span></div>
+                ) : (
+                  <div style={{ padding: '6px 14px', background: 'rgba(255,165,0,0.15)', borderRadius: 6, color: '#FFA500', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>Needs Report</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {sentReports.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <h3 style={{ color: '#666', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>Recently Sent ({sentReports.length})</h3>
+          {sentReports.slice(0, 10).map(sr => {
+            const a = athletes.find(x => x.id === sr.athlete_id);
+            return (
+              <div key={sr.id} style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666' }}>
+                <span>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'} — {sr.pr_count} PRs ({sr.pr_summary})</span>
+                <span>{new Date(sr.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
