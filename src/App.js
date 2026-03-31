@@ -1177,23 +1177,14 @@ function TestSettingsPage({ testDefs, setTestDefs, showNotification }) {
 
 /* ===================== PROGRESS REPORTS PAGE ===================== */
 const TEST_DESCRIPTIONS = {
-  '5_10_fly': 'acceleration (how quickly they get up to speed)',
-  'max_velocity': 'top-end speed',
-  '5_0_5': 'agility (ability to change direction quickly)',
+  '5_10_fly': 'their acceleration — how quickly they get up to speed',
+  'max_velocity': 'how fast they can run at top-end speed',
+  '5_0_5': 'agility — how quickly they can change direction',
   '5_10_5': 'change of direction speed',
-  'vertical_jump': 'lower body explosive power',
-  'broad_jump': 'horizontal power and athleticism',
-  'approach_jump': 'approach jump (combines speed + power)',
-  'rsi': 'reactive strength (how springy and elastic they are)',
-  'clean': 'total body strength and power',
-  'back_squat': 'lower body maximal strength',
-  'front_squat': 'lower body and core strength',
-  'press': 'upper body pressing strength',
-  'push_press': 'overhead power',
-  'jerk': 'overhead explosive strength',
-  'bench_press': 'upper body strength',
-  'sl_rsi_left': 'single-leg reactive strength (left)',
-  'sl_rsi_right': 'single-leg reactive strength (right)',
+  'rsi': 'reactive strength — how springy and elastic they are off the ground',
+  'approach_jump': 'their running jump',
+  'sl_rsi_left': 'single-leg ground contact (left)',
+  'sl_rsi_right': 'single-leg ground contact (right)',
 };
 
 function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification }) {
@@ -1242,7 +1233,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
       if (!improved) return;
       const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
       if (latest.value === best) {
-        prsByTest[r.test_id] = { testId: r.test_id, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: bestBefore.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[r.test_id] || td.name.toLowerCase(), feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: bestBefore.raw, newRaw: latest.raw };
+        prsByTest[r.test_id] = { testId: r.test_id, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: bestBefore.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[r.test_id] || '', feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: bestBefore.raw, newRaw: latest.raw };
       }
     });
     return Object.values(prsByTest);
@@ -1287,7 +1278,8 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     const name = a.first_name;
     let msg = `Hey! Just wanted to give you a quick progress update on ${name}. Over the last few months ${name} has been putting in great work and it's showing:\n\n`;
     prs.forEach(pr => {
-      msg += `- ${pr.testName}: improved from ${formatOldVal(pr)} to ${formatVal(pr)} (${improvementText(pr)}) — this represents ${pr.description}\n`;
+      const desc = pr.description ? ` — ${pr.description}` : '';
+      msg += `- ${pr.testName}: improved from ${formatOldVal(pr)} to ${formatVal(pr)} (${improvementText(pr)})${desc}\n`;
     });
     msg += `\n${name} is making real progress. Keep up the great work!`;
     return msg;
@@ -1347,12 +1339,37 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         </div>
 
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>PR Improvements</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>PR Improvements</h3>
+            <button onClick={() => {
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              const w = 600, rowH = 52, padTop = 80, padBot = 40;
+              const h = padTop + athleteData.prs.length * rowH + padBot;
+              svg.setAttribute('width', w); svg.setAttribute('height', h); svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+              let svgContent = `<rect width="${w}" height="${h}" fill="#0a1628" rx="16"/>`;
+              svgContent += `<text x="30" y="36" fill="#00d4ff" font-family="Arial Black,sans-serif" font-size="22" font-weight="900">WILMINGTON STRENGTH</text>`;
+              svgContent += `<text x="30" y="60" fill="#888" font-family="Arial,sans-serif" font-size="14">${athleteData.athlete.first_name} ${athleteData.athlete.last_name} — Progress Report</text>`;
+              athleteData.prs.forEach((pr, i) => {
+                const y = padTop + i * rowH;
+                svgContent += `<rect x="20" y="${y}" width="${w-40}" height="${rowH-8}" fill="rgba(0,255,136,0.08)" rx="8"/>`;
+                svgContent += `<text x="34" y="${y+22}" fill="#00ff88" font-family="Arial,sans-serif" font-size="14" font-weight="700">${pr.testName}</text>`;
+                svgContent += `<text x="34" y="${y+40}" fill="#888" font-family="Arial,sans-serif" font-size="12">${formatOldVal(pr)}  →  ${formatVal(pr)}  (${improvementText(pr)})</text>`;
+              });
+              svgContent += `<text x="${w/2}" y="${h-14}" fill="#444" font-family="Arial,sans-serif" font-size="10" text-anchor="middle">wilmington-strength-app.netlify.app</text>`;
+              svg.innerHTML = svgContent;
+              const svgData = new XMLSerializer().serializeToString(svg);
+              const canvas = document.createElement('canvas'); canvas.width = w * 2; canvas.height = h * 2;
+              const ctx = canvas.getContext('2d'); ctx.scale(2, 2);
+              const img = new Image();
+              img.onload = () => { ctx.drawImage(img, 0, 0); const link = document.createElement('a'); link.download = `${athleteData.athlete.first_name}_${athleteData.athlete.last_name}_progress.png`; link.href = canvas.toDataURL('image/png'); link.click(); };
+              img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+            }} style={{ padding: '8px 16px', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Save Image</button>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {athleteData.prs.map(pr => (
               <div key={pr.testId} style={{ background: 'rgba(0,255,136,0.06)', borderRadius: 10, padding: '16px 20px', border: '1px solid rgba(0,255,136,0.2)' }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88', marginBottom: 4 }}>{pr.testName}</div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>
+                {pr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ color: '#666', fontSize: 16 }}>{formatOldVal(pr)}</span>
                   <span style={{ color: '#00ff88', fontSize: 18 }}>→</span>
