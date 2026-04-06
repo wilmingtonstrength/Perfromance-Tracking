@@ -1484,7 +1484,8 @@ function MphClubPage({ athletes, results }) {
   const clubs = {};
   CLUB_MPHS.forEach(mph => { clubs[mph] = []; });
   Object.entries(athleteBest).forEach(([aId, { val, date }]) => {
-    const a = athletes.find(x => x.id === aId);
+    const numId = typeof aId === 'string' ? parseInt(aId) : aId;
+    const a = athletes.find(x => x.id === numId);
     if (!a) return;
     CLUB_MPHS.forEach(mph => {
       if (val >= mph) clubs[mph].push({ athlete: a, best: val, date });
