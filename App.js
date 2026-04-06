@@ -51,6 +51,13 @@ const formatResultWithUnit = (testDef, value) => {
   const unit = testDef.display_unit || testDef.unit;
   return formatted + (unit ? ' ' + unit : '');
 };
+const formatWithRaw = (testDef, convertedValue, rawValue) => {
+  const main = formatResultWithUnit(testDef, convertedValue);
+  if (!testDef || !testDef.convert_formula) return main;
+  const raw = parseFloat(rawValue);
+  if (isNaN(raw)) return main;
+  return main + ' (' + raw.toFixed(2) + 's)';
+};
 const applyConversion = (testDef, rawValue) => {
   if (!testDef || !testDef.convert_formula) return rawValue;
   try {
@@ -316,6 +323,15 @@ export default function App() {
     return td.direction === 'higher' ? Math.max(...ar.map(r => parseFloat(r.converted_value))) : Math.min(...ar.map(r => parseFloat(r.converted_value)));
   };
 
+  const getPRResult = (athleteId, testId) => {
+    const td = getTestById(testId);
+    if (!td) return null;
+    const ar = results.filter(r => r.athlete_id === athleteId && r.test_id === testId);
+    if (ar.length === 0) return null;
+    const sorted = [...ar].sort((a, b) => td.direction === 'higher' ? parseFloat(b.converted_value) - parseFloat(a.converted_value) : parseFloat(a.converted_value) - parseFloat(b.converted_value));
+    return sorted[0];
+  };
+
   if (loading) return (<div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d4ff', fontSize: 20 }}>Loading...</div>);
 
   const navItems = [
@@ -326,6 +342,8 @@ export default function App() {
     { id: 'jumpcalc', label: '📏 Jump Calc' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'testsettings', label: '⚙️ Tests' },
+    { id: 'progressreports', label: '📋 Reports' },
+    { id: 'mphclub', label: '🏎️ MPH Club' },
   ];
 
   return (
@@ -344,13 +362,15 @@ export default function App() {
       </header>
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} getTestsForType={getTestsForType} />}
-        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} />}
+        {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
+        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
+        {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
+        {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -358,7 +378,7 @@ export default function App() {
 }
 
 /* ===================== TEST ENTRY PAGE ===================== */
-function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForType }) {
+function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [useKg, setUseKg] = useState(false);
@@ -396,7 +416,7 @@ function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForTy
     if (toLog.length === 0) { alert('Please enter at least one value'); return; }
     setSubmitting(true);
     const logged = await logResults(toLog);
-    setSubmittedResults(logged.map(r => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); return { athlete: (a ? a.first_name + ' ' + a.last_name : 'Unknown'), test: t ? t.name : r.test_id, value: r.converted_value, testDef: t, unit: t ? (t.display_unit || t.unit) : '', isPR: r.is_pr }; }));
+    setSubmittedResults(logged.map(r => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); return { athlete: (a ? a.first_name + ' ' + a.last_name : 'Unknown'), test: t ? t.name : r.test_id, value: r.converted_value, rawValue: r.raw_value, testDef: t, unit: t ? (t.display_unit || t.unit) : '', isPR: r.is_pr }; }));
     setShowSummary(true); setSubmitting(false);
   };
 
@@ -408,8 +428,8 @@ function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForTy
       <div>
         <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Results Logged</h1>
         <p style={{ color: '#888', marginBottom: 24 }}>{submittedResults.length} result{submittedResults.length !== 1 ? 's' : ''} saved</p>
-        {prResults.length > 0 && (<div style={{ background: 'rgba(0,255,136,0.1)', borderRadius: 12, padding: 24, border: '1px solid rgba(0,255,136,0.4)', marginBottom: 16 }}><h2 style={{ margin: '0 0 16px 0', color: '#00ff88', fontSize: 22 }}>🏆 New PRs — {prResults.length}</h2>{prResults.map((r, i) => (<div key={i} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, fontSize: 16 }}>{r.athlete} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>— {r.test}</span></span><span style={{ color: '#00ff88', fontWeight: 800, fontSize: 18 }}>{formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
-        {nonPRResults.length > 0 && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}><h3 style={{ margin: '0 0 12px 0', color: '#aaa', fontSize: 16 }}>Other Results</h3>{nonPRResults.map((r, i) => (<div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between' }}><span><span style={{ fontWeight: 600 }}>{r.athlete}</span> — {r.test}</span><span style={{ color: '#00d4ff' }}>{formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
+        {prResults.length > 0 && (<div style={{ background: 'rgba(0,255,136,0.1)', borderRadius: 12, padding: 24, border: '1px solid rgba(0,255,136,0.4)', marginBottom: 16 }}><h2 style={{ margin: '0 0 16px 0', color: '#00ff88', fontSize: 22 }}>🏆 New PRs — {prResults.length}</h2>{prResults.map((r, i) => (<div key={i} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, fontSize: 16 }}>{r.athlete} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>— {r.test}</span></span><span style={{ color: '#00ff88', fontWeight: 800, fontSize: 18 }}>{r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
+        {nonPRResults.length > 0 && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}><h3 style={{ margin: '0 0 12px 0', color: '#aaa', fontSize: 16 }}>Other Results</h3>{nonPRResults.map((r, i) => (<div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between' }}><span><span style={{ fontWeight: 600 }}>{r.athlete}</span> — {r.test}</span><span style={{ color: '#00d4ff' }}>{r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
         <button onClick={startNextGroup} style={{ width: '100%', padding: '20px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 2 }}>+ Start Next Group</button>
         <p style={{ textAlign: 'center', marginTop: 12, color: '#555', fontSize: 13 }}>Need to fix an entry? Go to Athletes tab to edit or delete results.</p>
       </div>
@@ -455,9 +475,9 @@ function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForTy
                   <div key={row.athleteId} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', minWidth: 'fit-content' }}>
                     <div style={{ minWidth: 140 }}><div style={{ fontWeight: 600, fontSize: 14, color: '#e8e8e8' }}>{athlete ? athlete.first_name : ''}</div><div style={{ fontSize: 11, color: '#666' }}>{athlete ? athlete.last_name : ''}</div></div>
                     {selectedTests.map(tid => {
-                      const t = getTestById(tid); const pr = getPR(row.athleteId, tid);
+                      const t = getTestById(tid); const pr = getPR(row.athleteId, tid); const prR = getPRResult(row.athleteId, tid);
                       const useFtIn = t && t.feet_inches; const isRowTest = t && t.row_time;
-                      const prDisplay = pr !== null ? (t && t.allow_kg && useKg ? Math.round(pr / 2.205) + ' kg' : formatResultWithUnit(t, pr)) : null;
+                      const prDisplay = pr !== null ? (t && t.allow_kg && useKg ? Math.round(pr / 2.205) + ' kg' : (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr))) : null;
                       return (<div key={tid} style={{ minWidth: useFtIn ? 130 : isRowTest ? 120 : 100, flex: 1 }}>
                         {useFtIn ? <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isRowTest ? <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : <input type="number" step="0.01" placeholder={t && t.allow_kg && useKg ? 'kg' : (t ? t.unit : 'val')} value={row.values[tid] || ''} onChange={(e) => updateValue(rowIndex, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />}
                         {prDisplay !== null && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>PR: {prDisplay}</div>}
@@ -478,7 +498,7 @@ function TestEntryPage({ athletes, logResults, getPR, getTestById, getTestsForTy
 }
 
 /* ===================== COMBINED ATHLETES PAGE ===================== */
-function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getTestById, getTestsForType, testDefs, deleteResult, updateResult }) {
+function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
@@ -556,10 +576,10 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
         <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
           {[{ id: 'prs', label: 'Personal Records' }, { id: 'history', label: 'Test History' }, { id: 'progress', label: 'Progress Charts' }, ...(!isAdult ? [{ id: 'score', label: 'Athlete Score' }] : [])].map(tab => (<button key={tab.id} onClick={() => setProfileTab(tab.id)} style={{ padding: '10px 20px', background: profileTab === tab.id ? (tab.id === 'score' ? 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)') : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: profileTab === tab.id ? (tab.id === 'score' ? '#fff' : '#0a1628') : '#aaa', fontWeight: profileTab === tab.id ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{tab.label}</button>))}
         </div>
-        {profileTab === 'prs' && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>{Object.entries(testSet).map(([catLabel, tests]) => (<div key={catLabel}><h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{catLabel}</h4>{tests.map(t => { const pr = getPR(athlete.id, t.id); return (<div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}><span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}</span></div>); })}</div>))}</div></div>)}
+        {profileTab === 'prs' && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>{Object.entries(testSet).map(([catLabel, tests]) => (<div key={catLabel}><h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{catLabel}</h4>{tests.map(t => { const pr = getPR(athlete.id, t.id); const prR = getPRResult(athlete.id, t.id); return (<div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}><span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr)) : '-'}</span></div>); })}</div>))}</div></div>)}
         {profileTab === 'history' && (<div><div style={{ marginBottom: 16 }}><select value={historyFilter} onChange={(e) => setHistoryFilter(e.target.value)} style={{ ...iStyle, width: 260 }}><option value="">All Tests</option>{Object.entries(testSet).map(([catLabel, tests]) => (<optgroup key={catLabel} label={catLabel}>{tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>))}</select></div>
-          {sortedHistory.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{sortedHistory.map(r => { const t = getTestById(r.test_id); const isEd = editingResult === r.id; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 12, flexWrap: 'wrap' }}>{isEd ? (<><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} /><span style={{ color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</span><input type="number" step="0.01" value={editValue} onChange={(e) => setEditValue(e.target.value)} onWheel={preventScrollChange} style={{ width: 100, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} />{t && t.feet_inches && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatFeetInches(parseFloat(editValue))}</span>}{t && t.row_time && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatRowTime(parseFloat(editValue))}</span>}<button onClick={() => handleSaveResult(r)} style={{ padding: '6px 12px', background: 'rgba(0,255,136,0.3)', border: 'none', borderRadius: 4, color: '#00ff88', cursor: 'pointer', fontSize: 12 }}>Save</button><button onClick={() => setEditingResult(null)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button></>) : (<><div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div><div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</div><div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? formatResultWithUnit(t, r.converted_value) : r.converted_value}{r.is_pr && ' 🏆'}</div><button onClick={() => handleEditResult(r)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button><button onClick={() => { if (window.confirm('Delete this result?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Delete</button></>)}</div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results found.</div>)}</div>)}
-        {profileTab === 'progress' && (<div><div style={{ marginBottom: 20 }}><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Test</label><select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={{ ...iStyle, width: 280 }}><option value="">Choose a test...</option>{Object.entries(testSet).map(([catLabel, tests]) => (<optgroup key={catLabel} label={catLabel}>{tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>))}</select></div>{chartData.length > 0 && testDef ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}><h3 style={{ margin: 0, fontSize: 20 }}>{testDef.name} Progress</h3>{getPR(selectedAthlete, selectedTest) !== null && (<div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>PR: {formatResultWithUnit(testDef, getPR(selectedAthlete, selectedTest))}</div>)}</div><SimpleChart data={chartData} direction={testDef.direction} testDef={testDef} onPointClick={() => { setProfileTab('history'); setHistoryFilter(selectedTest); }} /><div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>Click chart to view/edit individual results</div></div>) : selectedTest ? (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No data yet for {testDef?.name}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>Select a test above to view progress</div>)}</div>)}
+          {sortedHistory.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{sortedHistory.map(r => { const t = getTestById(r.test_id); const isEd = editingResult === r.id; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 12, flexWrap: 'wrap' }}>{isEd ? (<><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} /><span style={{ color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</span><input type="number" step="0.01" value={editValue} onChange={(e) => setEditValue(e.target.value)} onWheel={preventScrollChange} style={{ width: 100, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} />{t && t.feet_inches && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatFeetInches(parseFloat(editValue))}</span>}{t && t.row_time && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatRowTime(parseFloat(editValue))}</span>}<button onClick={() => handleSaveResult(r)} style={{ padding: '6px 12px', background: 'rgba(0,255,136,0.3)', border: 'none', borderRadius: 4, color: '#00ff88', cursor: 'pointer', fontSize: 12 }}>Save</button><button onClick={() => setEditingResult(null)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button></>) : (<><div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div><div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</div><div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}{r.is_pr && ' 🏆'}</div><button onClick={() => handleEditResult(r)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button><button onClick={() => { if (window.confirm('Delete this result?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Delete</button></>)}</div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results found.</div>)}</div>)}
+        {profileTab === 'progress' && (<div><div style={{ marginBottom: 20 }}><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Test</label><select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={{ ...iStyle, width: 280 }}><option value="">Choose a test...</option>{Object.entries(testSet).map(([catLabel, tests]) => (<optgroup key={catLabel} label={catLabel}>{tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>))}</select></div>{chartData.length > 0 && testDef ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}><h3 style={{ margin: 0, fontSize: 20 }}>{testDef.name} Progress</h3>{getPR(selectedAthlete, selectedTest) !== null && (() => { const prVal = getPR(selectedAthlete, selectedTest); const prR = getPRResult(selectedAthlete, selectedTest); return (<div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>PR: {prR && testDef.convert_formula ? formatWithRaw(testDef, prVal, prR.raw_value) : formatResultWithUnit(testDef, prVal)}</div>); })()}</div><SimpleChart data={chartData} direction={testDef.direction} testDef={testDef} onPointClick={() => { setProfileTab('history'); setHistoryFilter(selectedTest); }} /><div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>Click chart to view/edit individual results</div></div>) : selectedTest ? (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No data yet for {testDef?.name}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>Select a test above to view progress</div>)}</div>)}
         {profileTab === 'score' && !isAdult && (<div style={{ background: 'rgba(168,85,247,0.06)', borderRadius: 12, padding: 24, border: '1px solid rgba(168,85,247,0.25)' }}>{athleteScore ? (<><div style={{ display: 'flex', alignItems: 'center', gap: 32, marginBottom: 28, flexWrap: 'wrap' }}><div style={{ textAlign: 'center' }}><div style={{ fontSize: 80, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: scoreLabel(athleteScore.score).color, lineHeight: 1 }}>{athleteScore.score}</div><div style={{ fontSize: 13, color: scoreLabel(athleteScore.score).color, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>{scoreLabel(athleteScore.score).label}</div></div><div style={{ flex: 1, minWidth: 200 }}><div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{athleteScore.testsUsed} of {athleteScore.totalTests} tests scored · compared against {athletes.filter(a => (a.type || 'athlete') === 'athlete').length} youth athletes</div><div style={{ fontSize: 12, color: '#666', lineHeight: 1.6 }}>Score = percentile rank · 50 = gym average · 90+ = elite</div></div></div><div style={{ marginBottom: 28 }}><div style={{ height: 12, background: 'rgba(255,255,255,0.08)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}><div style={{ height: '100%', width: `${athleteScore.score}%`, background: `linear-gradient(90deg, #7c3aed, ${scoreLabel(athleteScore.score).color})`, borderRadius: 6 }} /></div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555', marginTop: 4 }}><span>1st %ile</span><span>25th</span><span>50th avg</span><span>75th</span><span>99th</span></div></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>{athleteScore.breakdown.map(item => { const sl = scoreLabel(item.tScore); const displayVal = item.testId === 'max_velocity' ? item.best.toFixed(1) + ' MPH' : item.unit ? item.best.toFixed(item.unit === 'sec' ? 2 : (item.unit === 'in' ? 1 : 0)) + ' ' + item.unit : item.best.toFixed(2); return (<div key={item.testId} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: '12px 14px', border: `1px solid ${sl.color}30` }}><div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{item.label}</div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><span style={{ fontSize: 22, fontWeight: 800, color: sl.color }}>{item.tScore}</span><span style={{ fontSize: 12, color: '#666' }}>{displayVal}</span></div><div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}><div style={{ height: '100%', width: `${item.tScore}%`, background: sl.color, borderRadius: 2 }} /></div></div>); })}{TSA_TEST_IDS.filter(t => !athleteScore.breakdown.find(b => b.testId === t.id)).map(t => (<div key={t.id} style={{ background: 'rgba(0,0,0,0.1)', borderRadius: 8, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.05)', opacity: 0.5 }}><div style={{ fontSize: 11, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{t.label}</div><div style={{ fontSize: 13, color: '#444' }}>No data</div></div>))}</div></>) : (<div style={{ textAlign: 'center', padding: 32, color: '#666' }}><p style={{ fontSize: 16, marginBottom: 8 }}>Not enough data to calculate an Athlete Score.</p><p style={{ fontSize: 13 }}>Needs at least one result in 1 of the 7 scored tests.</p></div>)}</div>)}
       </div>)}
       {!selectedAthlete && !showAddForm && filteredAthletes.length === 0 && (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No athletes found matching your search.</div>)}
@@ -589,7 +609,7 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
         <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={filterTest} onChange={(e) => setFilterTest(e.target.value)} style={{ ...iStyle, width: 220 }}><option value="">All Tests</option>{testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
         <div style={{ padding: '12px 20px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700, fontSize: 18 }}>{recentPRs.length} PR{recentPRs.length !== 1 ? 's' : ''}</div>
       </div>
-      {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? formatResultWithUnit(t, r.converted_value) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
+      {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
     </div>
   );
 }
@@ -1154,5 +1174,377 @@ function TestSettingsPage({ testDefs, setTestDefs, showNotification }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/* ===================== PROGRESS REPORTS PAGE ===================== */
+const TEST_DESCRIPTIONS = {
+  '5_10_fly': 'their acceleration — how quickly they get up to speed',
+  'max_velocity': 'how fast they can run at top-end speed',
+  '5_0_5': 'agility — how quickly they can change direction',
+  '5_10_5': 'change of direction speed',
+  'rsi': 'reactive strength — how springy and elastic they are off the ground',
+  'approach_jump': 'their running jump',
+  'sl_rsi_left': 'single-leg ground contact (left)',
+  'sl_rsi_right': 'single-leg ground contact (right)',
+};
+
+function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [selectedAthlete, setSelectedAthlete] = useState(null);
+  const [sentReports, setSentReports] = useState([]);
+  const [copied, setCopied] = useState(false);
+  const [minPRs, setMinPRs] = useState(5);
+  const [daysBack, setDaysBack] = useState(90);
+
+  const COACH_PIN = '1234';
+
+  useEffect(() => {
+    const loadSent = async () => {
+      const { data } = await supabase.from('progress_reports').select('*').order('sent_at', { ascending: false });
+      if (data) setSentReports(data);
+    };
+    if (unlocked) loadSent();
+  }, [unlocked]);
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+  const getRecentPRs = (athleteId) => {
+    const athleteResults = results.filter(r => r.athlete_id === athleteId);
+    const prsByTest = {};
+    athleteResults.forEach(r => {
+      const td = getTestById(r.test_id);
+      if (!td) return;
+      const testResults = athleteResults.filter(ar => ar.test_id === r.test_id).sort((a, b) => new Date(a.test_date) - new Date(b.test_date));
+      if (testResults.length < 2) return;
+      const vals = testResults.map(tr => ({ date: tr.test_date, value: parseFloat(tr.converted_value), raw: parseFloat(tr.raw_value) })).filter(v => !isNaN(v.value));
+      if (vals.length < 2) return;
+      const latest = vals[vals.length - 1];
+      const latestDate = new Date(latest.date);
+      if (latestDate < cutoffDate) return;
+      let bestBefore = null;
+      for (let i = vals.length - 2; i >= 0; i--) {
+        if (bestBefore === null) { bestBefore = vals[i]; continue; }
+        if (td.direction === 'higher' && vals[i].value > bestBefore.value) bestBefore = vals[i];
+        if (td.direction === 'lower' && vals[i].value < bestBefore.value) bestBefore = vals[i];
+      }
+      if (!bestBefore) return;
+      const improved = td.direction === 'higher' ? latest.value > bestBefore.value : latest.value < bestBefore.value;
+      if (!improved) return;
+      const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
+      if (latest.value === best) {
+        prsByTest[r.test_id] = { testId: r.test_id, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: bestBefore.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[r.test_id] || '', feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: bestBefore.raw, newRaw: latest.raw };
+      }
+    });
+    return Object.values(prsByTest);
+  };
+
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+  const flaggedAthletes = youthAthletes.map(a => {
+    const prs = getRecentPRs(a.id);
+    const lastSent = sentReports.find(sr => sr.athlete_id === a.id);
+    return { athlete: a, prs, lastSent };
+  }).filter(a => a.prs.length >= minPRs).sort((a, b) => b.prs.length - a.prs.length);
+
+  const formatVal = (pr) => {
+    if (pr.feetInches) return formatFeetInches(pr.newValue);
+    if (pr.unit === 'sec') return pr.newValue.toFixed(2) + 's';
+    if (pr.unit === 'MPH') return pr.newValue.toFixed(1) + ' MPH';
+    if (pr.unit === 'inches') return pr.newValue.toFixed(1) + '"';
+    if (pr.unit === 'lbs') return Math.round(pr.newValue) + ' lbs';
+    return pr.newValue.toFixed(1);
+  };
+  const formatOldVal = (pr) => {
+    if (pr.feetInches) return formatFeetInches(pr.oldValue);
+    if (pr.unit === 'sec') return pr.oldValue.toFixed(2) + 's';
+    if (pr.unit === 'MPH') return pr.oldValue.toFixed(1) + ' MPH';
+    if (pr.unit === 'inches') return pr.oldValue.toFixed(1) + '"';
+    if (pr.unit === 'lbs') return Math.round(pr.oldValue) + ' lbs';
+    return pr.oldValue.toFixed(1);
+  };
+  const improvementText = (pr) => {
+    const diff = Math.abs(pr.newValue - pr.oldValue);
+    if (pr.unit === 'sec') return diff.toFixed(2) + 's faster';
+    if (pr.unit === 'MPH') return diff.toFixed(1) + ' MPH faster';
+    if (pr.unit === 'inches') return diff.toFixed(1) + '" higher';
+    if (pr.unit === 'lbs') return Math.round(diff) + ' lbs stronger';
+    if (pr.feetInches) return formatFeetInches(diff) + ' further';
+    return diff.toFixed(1) + ' better';
+  };
+
+  const generateMessage = (athleteData) => {
+    const a = athleteData.athlete;
+    const prs = athleteData.prs;
+    const name = a.first_name;
+    let msg = `Hey! Just wanted to give you a quick progress update on ${name}. Over the last few months ${name} has been putting in great work and it's showing:\n\n`;
+    prs.forEach(pr => {
+      const desc = pr.description ? ` — ${pr.description}` : '';
+      msg += `- ${pr.testName}: improved from ${formatOldVal(pr)} to ${formatVal(pr)} (${improvementText(pr)})${desc}\n`;
+    });
+    msg += `\n${name} is making real progress. Keep up the great work!`;
+    return msg;
+  };
+
+  const markAsSent = async (athleteData) => {
+    const msg = generateMessage(athleteData);
+    const { data, error } = await supabase.from('progress_reports').insert([{
+      athlete_id: athleteData.athlete.id,
+      pr_count: athleteData.prs.length,
+      pr_summary: athleteData.prs.map(p => p.testName).join(', '),
+      message_text: msg,
+    }]).select();
+    if (data) {
+      setSentReports([data[0], ...sentReports]);
+      showNotification('Marked as sent!');
+    }
+    if (error) showNotification('Error: ' + error.message, 'error');
+  };
+
+  const copyMessage = (athleteData) => {
+    const msg = generateMessage(athleteData);
+    navigator.clipboard.writeText(msg);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    showNotification('Copied to clipboard!');
+  };
+
+  if (!unlocked) {
+    return (
+      <div style={{ maxWidth: 400, margin: '80px auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+        <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 24, marginBottom: 8 }}>Coach Access</h2>
+        <p style={{ color: '#888', marginBottom: 24 }}>Enter PIN to access progress reports</p>
+        <input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => { setPin(e.target.value); if (e.target.value === COACH_PIN) setUnlocked(true); }} placeholder="Enter PIN" style={{ width: 200, padding: '16px 24px', background: 'rgba(0,0,0,0.3)', border: '2px solid rgba(0,212,255,0.3)', borderRadius: 12, color: '#fff', fontSize: 32, textAlign: 'center', letterSpacing: 12 }} />
+        {pin.length === 4 && pin !== COACH_PIN && <p style={{ color: '#ff6666', marginTop: 12, fontSize: 14 }}>Incorrect PIN</p>}
+      </div>
+    );
+  }
+
+  if (selectedAthlete) {
+    const athleteData = flaggedAthletes.find(a => a.athlete.id === selectedAthlete);
+    if (!athleteData) { setSelectedAthlete(null); return null; }
+    const msg = generateMessage(athleteData);
+    const age = calculateAge(athleteData.athlete.birthday);
+    const wasSent = sentReports.some(sr => sr.athlete_id === selectedAthlete);
+
+    return (
+      <div>
+        <button onClick={() => setSelectedAthlete(null)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, margin: 0 }}>{athleteData.athlete.first_name} {athleteData.athlete.last_name}</h2>
+            <p style={{ color: '#888', margin: '4px 0' }}>{age && `${age} yrs`}{athleteData.athlete.gender && ` · ${athleteData.athlete.gender}`} · {athleteData.prs.length} PRs in last {daysBack} days</p>
+          </div>
+          {wasSent && <span style={{ padding: '6px 14px', background: 'rgba(0,255,136,0.15)', borderRadius: 6, color: '#00ff88', fontSize: 13, fontWeight: 600 }}>Previously sent</span>}
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>PR Improvements</h3>
+            <button onClick={() => {
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              const w = 600, rowH = 52, padTop = 80, padBot = 40;
+              const h = padTop + athleteData.prs.length * rowH + padBot;
+              svg.setAttribute('width', w); svg.setAttribute('height', h); svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+              let svgContent = `<rect width="${w}" height="${h}" fill="#0a1628" rx="16"/>`;
+              svgContent += `<text x="30" y="36" fill="#00d4ff" font-family="Arial Black,sans-serif" font-size="22" font-weight="900">WILMINGTON STRENGTH</text>`;
+              svgContent += `<text x="30" y="60" fill="#888" font-family="Arial,sans-serif" font-size="14">${athleteData.athlete.first_name} ${athleteData.athlete.last_name} — Progress Report</text>`;
+              athleteData.prs.forEach((pr, i) => {
+                const y = padTop + i * rowH;
+                svgContent += `<rect x="20" y="${y}" width="${w-40}" height="${rowH-8}" fill="rgba(0,255,136,0.08)" rx="8"/>`;
+                svgContent += `<text x="34" y="${y+22}" fill="#00ff88" font-family="Arial,sans-serif" font-size="14" font-weight="700">${pr.testName}</text>`;
+                svgContent += `<text x="34" y="${y+40}" fill="#888" font-family="Arial,sans-serif" font-size="12">${formatOldVal(pr)}  →  ${formatVal(pr)}  (${improvementText(pr)})</text>`;
+              });
+              svgContent += `<text x="${w/2}" y="${h-14}" fill="#444" font-family="Arial,sans-serif" font-size="10" text-anchor="middle">wilmington-strength-app.netlify.app</text>`;
+              svg.innerHTML = svgContent;
+              const svgData = new XMLSerializer().serializeToString(svg);
+              const canvas = document.createElement('canvas'); canvas.width = w * 2; canvas.height = h * 2;
+              const ctx = canvas.getContext('2d'); ctx.scale(2, 2);
+              const img = new Image();
+              img.onload = () => { ctx.drawImage(img, 0, 0); const link = document.createElement('a'); link.download = `${athleteData.athlete.first_name}_${athleteData.athlete.last_name}_progress.png`; link.href = canvas.toDataURL('image/png'); link.click(); };
+              img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+            }} style={{ padding: '8px 16px', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Save Image</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {athleteData.prs.map(pr => (
+              <div key={pr.testId} style={{ background: 'rgba(0,255,136,0.06)', borderRadius: 10, padding: '16px 20px', border: '1px solid rgba(0,255,136,0.2)' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88', marginBottom: 4 }}>{pr.testName}</div>
+                {pr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: '#666', fontSize: 16 }}>{formatOldVal(pr)}</span>
+                  <span style={{ color: '#00ff88', fontSize: 18 }}>→</span>
+                  <span style={{ color: '#00ff88', fontWeight: 800, fontSize: 20 }}>{formatVal(pr)}</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#00ff88', marginTop: 4 }}>{improvementText(pr)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Message to Parent</h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => copyMessage(athleteData)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{copied ? 'Copied!' : 'Copy Text'}</button>
+              <button onClick={() => markAsSent(athleteData)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>Mark as Sent</button>
+            </div>
+          </div>
+          <pre style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 20, color: '#ccc', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordWrap: 'break-word', border: '1px solid rgba(255,255,255,0.1)', margin: 0 }}>{msg}</pre>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Progress Reports</h1>
+          <p style={{ color: '#888' }}>{flaggedAthletes.length} athletes ready for a progress report</p>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ fontSize: 13, color: '#666' }}>Min PRs:</div>
+          {[3, 4, 5, 6].map(n => (<button key={n} onClick={() => setMinPRs(n)} style={{ width: 36, height: 36, background: minPRs === n ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: minPRs === n ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: minPRs === n ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 14, fontWeight: minPRs === n ? 700 : 400 }}>{n}+</button>))}
+          <div style={{ fontSize: 13, color: '#666', marginLeft: 12 }}>Days:</div>
+          {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
+        </div>
+      </div>
+
+      {flaggedAthletes.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes with {minPRs}+ PRs in the last {daysBack} days.</p><p style={{ fontSize: 13 }}>Try lowering the minimum PRs or increasing the time range.</p></div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {flaggedAthletes.map(({ athlete, prs, lastSent }) => {
+            const age = calculateAge(athlete.birthday);
+            const wasSent = !!lastSent;
+            const sentDate = lastSent ? new Date(lastSent.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+            return (
+              <div key={athlete.id} onClick={() => setSelectedAthlete(athlete.id)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: wasSent ? 'rgba(0,255,136,0.03)' : 'rgba(255,255,255,0.03)', borderRadius: 12, border: `1px solid ${wasSent ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.07)'}`, cursor: 'pointer' }}>
+                <div style={{ width: 48, height: 48, borderRadius: 10, background: 'rgba(0,255,136,0.15)', border: '2px solid rgba(0,255,136,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{prs.length}</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{athlete.first_name} {athlete.last_name}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · PRs: {prs.map(p => p.testName).join(', ')}</div>
+                </div>
+                {wasSent ? (
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}><span style={{ fontSize: 12, color: '#00ff88', fontWeight: 600 }}>Sent {sentDate}</span></div>
+                ) : (
+                  <div style={{ padding: '6px 14px', background: 'rgba(255,165,0,0.15)', borderRadius: 6, color: '#FFA500', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>Needs Report</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {sentReports.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <h3 style={{ color: '#666', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 }}>Recently Sent ({sentReports.length})</h3>
+          {sentReports.slice(0, 10).map(sr => {
+            const a = athletes.find(x => x.id === sr.athlete_id);
+            return (
+              <div key={sr.id} style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666' }}>
+                <span>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'} — {sr.pr_count} PRs ({sr.pr_summary})</span>
+                <span>{new Date(sr.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ===================== MPH CLUB PAGE ===================== */
+function MphClubPage({ athletes, results }) {
+  const CLUB_MPHS = [22, 21, 20, 19, 18, 17];
+  const CLUB_COLORS = {
+    22: { bg: 'linear-gradient(135deg, #ff0044 0%, #cc0033 100%)', text: '#fff', badge: '#ff0044' },
+    21: { bg: 'linear-gradient(135deg, #ffd700 0%, #ffaa00 100%)', text: '#0a1628', badge: '#ffd700' },
+    20: { bg: 'linear-gradient(135deg, #ff6b00 0%, #e55d00 100%)', text: '#0a1628', badge: '#ff6b00' },
+    19: { bg: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', text: '#0a1628', badge: '#00ff88' },
+    18: { bg: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', text: '#0a1628', badge: '#00d4ff' },
+    17: { bg: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)', text: '#fff', badge: '#a855f7' },
+  };
+
+  const velocityResults = results.filter(r => r.test_id === 'max_velocity');
+  const athleteBest = {};
+  velocityResults.forEach(r => {
+    const val = parseFloat(r.converted_value);
+    if (isNaN(val)) return;
+    const aId = r.athlete_id;
+    if (!athleteBest[aId] || val > athleteBest[aId].val) {
+      athleteBest[aId] = { val, date: r.test_date };
+    }
+  });
+
+  const clubs = {};
+  CLUB_MPHS.forEach(mph => { clubs[mph] = []; });
+  Object.entries(athleteBest).forEach(([aId, { val, date }]) => {
+    const a = athletes.find(x => x.id === aId);
+    if (!a) return;
+    CLUB_MPHS.forEach(mph => {
+      if (val >= mph) clubs[mph].push({ athlete: a, best: val, date });
+    });
+  });
+  CLUB_MPHS.forEach(mph => {
+    clubs[mph].sort((a, b) => b.best - a.best);
+  });
+  const totalMembers = new Set();
+  CLUB_MPHS.forEach(mph => clubs[mph].forEach(m => totalMembers.add(m.athlete.id)));
+
+  return (
+    React.createElement('div', null,
+      React.createElement('div', { style: { marginBottom: 32 } },
+        React.createElement('h1', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 } }, 'MPH Club'),
+        React.createElement('p', { style: { color: '#888', fontSize: 14 } },
+          totalMembers.size + ' athlete' + (totalMembers.size !== 1 ? 's' : '') + ' across ' + CLUB_MPHS.length + ' speed clubs'
+        )
+      ),
+      CLUB_MPHS.map(mph => {
+        const members = clubs[mph];
+        const colors = CLUB_COLORS[mph];
+        return React.createElement('div', { key: mph, style: { marginBottom: 24, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' } },
+          React.createElement('div', { style: { background: colors.bg, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+              React.createElement('span', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 28, color: colors.text } }, mph),
+              React.createElement('span', { style: { fontSize: 16, fontWeight: 700, color: colors.text, opacity: 0.8 } }, 'MPH CLUB')
+            ),
+            React.createElement('span', { style: { fontSize: 14, fontWeight: 600, color: colors.text, opacity: 0.7 } },
+              members.length + ' member' + (members.length !== 1 ? 's' : '')
+            )
+          ),
+          members.length === 0
+            ? React.createElement('div', { style: { background: 'rgba(0,0,0,0.3)', padding: '20px 24px', textAlign: 'center', color: '#555', fontSize: 14, fontStyle: 'italic' } }, 'No members yet')
+            : React.createElement('div', { style: { background: 'rgba(0,0,0,0.3)' } },
+                members.map((m, i) => {
+                  const age = calculateAge(m.athlete.birthday);
+                  const isAdult = (m.athlete.type === 'adult');
+                  return React.createElement('div', { key: m.athlete.id, style: { padding: '12px 24px', borderBottom: i < members.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+                      React.createElement('span', { style: { color: '#666', fontSize: 13, width: 28, textAlign: 'right' } }, '#' + (i + 1)),
+                      React.createElement('span', { style: { fontWeight: 600, fontSize: 15, color: '#fff' } },
+                        m.athlete.first_name + ' ' + m.athlete.last_name
+                      ),
+                      age && React.createElement('span', { style: { color: '#888', fontSize: 12 } }, age + ' yrs'),
+                      isAdult && React.createElement('span', { style: { fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 10, fontWeight: 600 } }, 'ADULT')
+                    ),
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+                      React.createElement('span', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 16, color: colors.badge } },
+                        m.best.toFixed(1) + ' MPH'
+                      ),
+                      React.createElement('span', { style: { color: '#666', fontSize: 12 } },
+                        new Date(m.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      )
+                    )
+                  );
+                })
+              )
+        );
+      })
+    )
   );
 }
