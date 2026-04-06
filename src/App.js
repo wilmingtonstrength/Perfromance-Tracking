@@ -343,6 +343,7 @@ export default function App() {
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'testsettings', label: '⚙️ Tests' },
     { id: 'progressreports', label: '📋 Reports' },
+    { id: 'mphclub', label: '🏎️ MPH Club' },
   ];
 
   return (
@@ -369,6 +370,7 @@ export default function App() {
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
+        {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -1453,5 +1455,96 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         </div>
       )}
     </div>
+  );
+}
+
+/* ===================== MPH CLUB PAGE ===================== */
+function MphClubPage({ athletes, results }) {
+  const CLUB_MPHS = [22, 21, 20, 19, 18, 17];
+  const CLUB_COLORS = {
+    22: { bg: 'linear-gradient(135deg, #ff0044 0%, #cc0033 100%)', text: '#fff', badge: '#ff0044' },
+    21: { bg: 'linear-gradient(135deg, #ffd700 0%, #ffaa00 100%)', text: '#0a1628', badge: '#ffd700' },
+    20: { bg: 'linear-gradient(135deg, #ff6b00 0%, #e55d00 100%)', text: '#0a1628', badge: '#ff6b00' },
+    19: { bg: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', text: '#0a1628', badge: '#00ff88' },
+    18: { bg: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', text: '#0a1628', badge: '#00d4ff' },
+    17: { bg: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)', text: '#fff', badge: '#a855f7' },
+  };
+
+  const velocityResults = results.filter(r => r.test_id === 'max_velocity');
+  const athleteBest = {};
+  velocityResults.forEach(r => {
+    const val = parseFloat(r.converted_value);
+    if (isNaN(val)) return;
+    const aId = r.athlete_id;
+    if (!athleteBest[aId] || val > athleteBest[aId].val) {
+      athleteBest[aId] = { val, date: r.test_date };
+    }
+  });
+
+  const clubs = {};
+  CLUB_MPHS.forEach(mph => { clubs[mph] = []; });
+  Object.entries(athleteBest).forEach(([aId, { val, date }]) => {
+    const a = athletes.find(x => x.id === aId);
+    if (!a) return;
+    CLUB_MPHS.forEach(mph => {
+      if (val >= mph) clubs[mph].push({ athlete: a, best: val, date });
+    });
+  });
+  CLUB_MPHS.forEach(mph => {
+    clubs[mph].sort((a, b) => b.best - a.best);
+  });
+  const totalMembers = new Set();
+  CLUB_MPHS.forEach(mph => clubs[mph].forEach(m => totalMembers.add(m.athlete.id)));
+
+  return (
+    React.createElement('div', null,
+      React.createElement('div', { style: { marginBottom: 32 } },
+        React.createElement('h1', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 } }, 'MPH Club'),
+        React.createElement('p', { style: { color: '#888', fontSize: 14 } },
+          totalMembers.size + ' athlete' + (totalMembers.size !== 1 ? 's' : '') + ' across ' + CLUB_MPHS.length + ' speed clubs'
+        )
+      ),
+      CLUB_MPHS.map(mph => {
+        const members = clubs[mph];
+        const colors = CLUB_COLORS[mph];
+        return React.createElement('div', { key: mph, style: { marginBottom: 24, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' } },
+          React.createElement('div', { style: { background: colors.bg, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+              React.createElement('span', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 28, color: colors.text } }, mph),
+              React.createElement('span', { style: { fontSize: 16, fontWeight: 700, color: colors.text, opacity: 0.8 } }, 'MPH CLUB')
+            ),
+            React.createElement('span', { style: { fontSize: 14, fontWeight: 600, color: colors.text, opacity: 0.7 } },
+              members.length + ' member' + (members.length !== 1 ? 's' : '')
+            )
+          ),
+          members.length === 0
+            ? React.createElement('div', { style: { background: 'rgba(0,0,0,0.3)', padding: '20px 24px', textAlign: 'center', color: '#555', fontSize: 14, fontStyle: 'italic' } }, 'No members yet')
+            : React.createElement('div', { style: { background: 'rgba(0,0,0,0.3)' } },
+                members.map((m, i) => {
+                  const age = calculateAge(m.athlete.birthday);
+                  const isAdult = (m.athlete.type === 'adult');
+                  return React.createElement('div', { key: m.athlete.id, style: { padding: '12px 24px', borderBottom: i < members.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+                      React.createElement('span', { style: { color: '#666', fontSize: 13, width: 28, textAlign: 'right' } }, '#' + (i + 1)),
+                      React.createElement('span', { style: { fontWeight: 600, fontSize: 15, color: '#fff' } },
+                        m.athlete.first_name + ' ' + m.athlete.last_name
+                      ),
+                      age && React.createElement('span', { style: { color: '#888', fontSize: 12 } }, age + ' yrs'),
+                      isAdult && React.createElement('span', { style: { fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 10, fontWeight: 600 } }, 'ADULT')
+                    ),
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+                      React.createElement('span', { style: { fontFamily: "'Archivo Black', sans-serif", fontSize: 16, color: colors.badge } },
+                        m.best.toFixed(1) + ' MPH'
+                      ),
+                      React.createElement('span', { style: { color: '#666', fontSize: 12 } },
+                        new Date(m.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      )
+                    )
+                  );
+                })
+              )
+        );
+      })
+    )
   );
 }
