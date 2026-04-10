@@ -674,10 +674,12 @@ export default function App() {
   const gymName = gym?.name || 'Kaimetric';
 
   const isAdmin = user?.email === 'mattsecrest58@gmail.com';
+  const hasJumpCalc = customTests.some(t => (t.name || '').toLowerCase().includes('approach') || (t.name || '').toLowerCase().includes('vertical'));
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
     { id: 'recentprs', label: '🔥 PRs & Results' },
+    ...(hasJumpCalc ? [{ id: 'jumpcalc', label: '📏 Jump Calc' }] : []),
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'settings', label: '⚙️ Settings' },
     ...(isAdmin ? [{ id: 'admin', label: '🔒 Admin' }] : []),
@@ -720,6 +722,7 @@ export default function App() {
         {page === 'entry' && <KMTestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} accentColor={accentColor} />}
         {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
+        {page === 'jumpcalc' && <KMJumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
         {page === 'settings' && <KMSettingsPage gym={gym} setGym={setGym} customTests={customTests} setCustomTests={setCustomTests} gymId={gymId} showNotification={showNotification} user={user} accentColor={accentColor} />}
         {page === 'admin' && isAdmin && <KMAdminPage accentColor={accentColor} />}
@@ -1460,6 +1463,141 @@ function KMRankingsPage({ athletes, results, customTests, accentColor }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ===================== JUMP CALCULATOR ===================== */
+function KMJumpCalcPage({ athletes, setAthletes, results, logResults, getPR, getTestById, customTests, accentColor, gymId, showNotification }) {
+  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  const jumpTest = customTests.find(t => {
+    const n = (t.name || '').toLowerCase();
+    return n.includes('approach') || (n.includes('vertical') && n.includes('jump'));
+  });
+
+  const addRow = (athleteId) => {
+    const athlete = athletes.find(a => a.id === athleteId);
+    if (!athlete || rows.find(r => r.athleteId === athleteId)) return;
+    const reach = athlete.standing_reach || null;
+    setRows([...rows, {
+      athleteId,
+      reachFeet: reach ? String(Math.floor(reach / 12)) : '',
+      reachInches: reach ? String(parseFloat((reach % 12).toFixed(1))) : '',
+      touchFeet: '', touchInches: '', saved: false
+    }]);
+  };
+
+  const updateRow = (index, field, value) => { const nr = [...rows]; nr[index][field] = value; nr[index].saved = false; setRows(nr); };
+  const removeRow = (index) => setRows(rows.filter((_, i) => i !== index));
+  const getReachTotal = (row) => (row.reachFeet !== '' && row.reachInches !== '') ? parseInt(row.reachFeet) * 12 + parseFloat(row.reachInches) : null;
+  const getTouchTotal = (row) => (row.touchFeet !== '' && row.touchInches !== '') ? parseInt(row.touchFeet) * 12 + parseFloat(row.touchInches) : null;
+  const getJumpResult = (row) => { const r = getReachTotal(row); const t = getTouchTotal(row); return (r !== null && t !== null && t > r) ? parseFloat((t - r).toFixed(1)) : null; };
+  const usedIds = rows.map(r => r.athleteId);
+
+  const saveAll = async () => {
+    if (!jumpTest) { showNotification('No approach jump test found. Add one in Settings first.', 'error'); return; }
+    setSaving(true);
+    const toSave = rows.filter(r => getJumpResult(r) !== null && !r.saved);
+    for (const row of toSave) {
+      const athlete = athletes.find(a => a.id === row.athleteId);
+      const reachTotal = getReachTotal(row);
+      if (reachTotal !== null && reachTotal !== athlete?.standing_reach) {
+        await supabase.from('athletes').update({ standing_reach: reachTotal }).eq('id', row.athleteId);
+        setAthletes(prev => prev.map(a => a.id === row.athleteId ? { ...a, standing_reach: reachTotal } : a));
+      }
+    }
+    const resultsToLog = toSave.map(row => ({
+      athleteId: row.athleteId, testId: jumpTest.id, testDate, value: getJumpResult(row)
+    }));
+    if (resultsToLog.length > 0) await logResults(resultsToLog);
+    setRows(rows.map(r => ({ ...r, saved: getJumpResult(r) !== null ? true : r.saved })));
+    setSaving(false);
+  };
+
+  const savedCount = rows.filter(r => r.saved).length;
+  const readyCount = rows.filter(r => getJumpResult(r) !== null && !r.saved).length;
+  const iStyle = { padding: '10px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16, textAlign: 'center' };
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Jump Calculator</h1>
+      <p style={{ color: '#888', marginBottom: 24 }}>Calculate approach jumps using standing reach and touch height. Results are saved automatically as the approach jump test.</p>
+      {!jumpTest && (
+        <div style={{ padding: '16px 20px', background: 'rgba(255,165,0,0.1)', borderRadius: 10, border: '1px solid rgba(255,165,0,0.3)', marginBottom: 24, color: '#FFA500', fontSize: 14 }}>
+          No approach jump or vertical jump test found. Add one in Settings to save results from the Jump Calculator.
+        </div>
+      )}
+      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'end' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Add Athletes</label>
+            <AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => addRow(id)} excludeIds={usedIds} placeholder="Search & add athlete..." />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Test Date</label>
+            <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} style={{ width: '100%', ...iStyle }} />
+          </div>
+        </div>
+      </div>
+
+      {rows.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '160px 140px 160px 100px 40px', gap: 8, padding: '0 12px', marginBottom: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Athlete</span>
+          <span style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Reach</span>
+          <span style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Touch Height</span>
+          <span style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Result</span>
+          <span></span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+        {rows.map((row, index) => {
+          const athlete = athletes.find(a => a.id === row.athleteId);
+          const jumpResult = getJumpResult(row);
+          const currentPR = jumpTest ? getPR(row.athleteId, jumpTest.id) : null;
+          const isNewPR = jumpResult !== null && currentPR !== null && jumpResult > currentPR;
+          const isFirst = jumpResult !== null && currentPR === null;
+          return (
+            <div key={row.athleteId} style={{ display: 'grid', gridTemplateColumns: '160px 140px 160px 100px 40px', gap: 8, padding: 12, borderRadius: 10, alignItems: 'center', background: row.saved ? 'rgba(0,255,136,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${row.saved ? 'rgba(0,255,136,0.2)' : (isNewPR || isFirst) && jumpResult ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.1)'}` }}>
+              <div><div style={{ fontWeight: 600, fontSize: 14 }}>{athlete?.first_name}</div><div style={{ fontSize: 11, color: '#666' }}>{athlete?.last_name}</div></div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input type="number" min="0" max="10" placeholder="ft" value={row.reachFeet} onChange={(e) => updateRow(index, 'reachFeet', e.target.value)} onWheel={preventScrollChange} style={{ width: 48, ...iStyle, padding: '8px 4px', fontSize: 14 }} />
+                <span style={{ color: '#666', fontSize: 14 }}>'</span>
+                <input type="number" min="0" max="11.9" step="0.5" placeholder="in" value={row.reachInches} onChange={(e) => updateRow(index, 'reachInches', e.target.value)} onWheel={preventScrollChange} style={{ width: 48, ...iStyle, padding: '8px 4px', fontSize: 14 }} />
+                <span style={{ color: '#666', fontSize: 14 }}>"</span>
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input type="number" min="0" max="12" placeholder="ft" value={row.touchFeet} onChange={(e) => updateRow(index, 'touchFeet', e.target.value)} onWheel={preventScrollChange} style={{ width: 48, ...iStyle, padding: '8px 6px' }} />
+                <span style={{ color: '#888', fontSize: 16 }}>'</span>
+                <input type="number" min="0" max="11.9" step="0.5" placeholder="in" value={row.touchInches} onChange={(e) => updateRow(index, 'touchInches', e.target.value)} onWheel={preventScrollChange} style={{ width: 48, ...iStyle, padding: '8px 6px' }} />
+                <span style={{ color: '#888', fontSize: 16 }}>"</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                {jumpResult !== null ? (
+                  <div>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: row.saved ? '#00ff88' : (isNewPR || isFirst) ? '#ffd700' : accentColor }}>{jumpResult}"</span>
+                    {row.saved && <span style={{ fontSize: 11, color: '#00ff88', display: 'block' }}>Saved</span>}
+                    {!row.saved && isNewPR && <span style={{ fontSize: 10, color: '#ffd700', display: 'block' }}>PR!</span>}
+                    {!row.saved && currentPR !== null && !isNewPR && <span style={{ fontSize: 10, color: '#666', display: 'block' }}>PR: {currentPR}"</span>}
+                  </div>
+                ) : <span style={{ color: '#444' }}>—</span>}
+              </div>
+              <button onClick={() => removeRow(index)} style={{ padding: '4px 8px', background: 'rgba(255,100,100,0.15)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 14 }}>×</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {readyCount > 0 && (
+        <button onClick={saveAll} disabled={saving} style={{ width: '100%', padding: '20px 32px', background: saving ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: saving ? 'default' : 'pointer', textTransform: 'uppercase', letterSpacing: 2 }}>
+          {saving ? 'Saving...' : `Save ${readyCount} Result${readyCount !== 1 ? 's' : ''}`}
+        </button>
+      )}
+      {savedCount > 0 && readyCount === 0 && <div style={{ textAlign: 'center', padding: 24, color: '#00ff88', fontWeight: 600 }}>All {savedCount} results saved!</div>}
+      {rows.length === 0 && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>Add athletes above to start calculating jumps.</p><p style={{ fontSize: 13, color: '#555' }}>Standing reach will be pre-filled from athlete profiles when available.</p></div>}
     </div>
   );
 }
