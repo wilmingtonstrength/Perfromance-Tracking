@@ -60,6 +60,19 @@ const applyConversion = (testDef, rawValue) => {
   } catch { return rawValue; }
 };
 
+const getFlyMPH = (testDef, timeInSeconds) => {
+  if (!testDef || !timeInSeconds) return null;
+  const t = parseFloat(timeInSeconds);
+  if (isNaN(t) || t <= 0) return null;
+  const name = (testDef.name || '').toLowerCase();
+  const isFly = name.includes('fly') || name.includes('10-yard fly') || name.includes('5-10');
+  const hasFormula = testDef.conversion_formula && testDef.conversion_formula.type === 'fly_to_mph';
+  if (!isFly && !hasFormula) return null;
+  const distYards = hasFormula ? testDef.conversion_formula.distance_yards : 10;
+  const meters = distYards * 0.9144;
+  return parseFloat((meters / t * 2.237).toFixed(1));
+};
+
 /* ===================== ATHLETE SCORE (TSA) ===================== */
 const TSA_TEST_LABELS = [
   { key: 'vertical_jump', label: 'Vertical Jump', direction: 'higher', unit: 'in' },
@@ -1188,7 +1201,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                   <h4 style={{ color: accentColor, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{cat}</h4>
                   {tests.map(t => { const pr = getPR(athlete.id, t.id); return (
                     <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
-                      <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}</span>
+                      <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}{pr !== null && getFlyMPH(t, pr) ? <span style={{ color: accentColor, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>{getFlyMPH(t, pr)} MPH</span> : ''}</span>
                     </div>
                   ); })}
                 </div>
@@ -1454,10 +1467,29 @@ function KMRankingsPage({ athletes, results, customTests, accentColor }) {
 /* ===================== RECORD BOARD ===================== */
 function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, accentColor }) {
   const [tvMode, setTvMode] = useState(false);
+  const [genderFilter, setGenderFilter] = useState('all');
+  const [ageFilter, setAgeFilter] = useState('all');
 
   const boardTests = customTests.filter(t => t.show_on_record_board && t.active);
   const speedTests = boardTests.filter(t => t.category === 'speed' || t.category === 'agility' || t.category === 'power');
   const strengthTests = boardTests.filter(t => t.category === 'strength');
+
+  const filterAthletes = (athleteId) => {
+    const a = athletes.find(x => x.id === athleteId);
+    if (!a) return false;
+    if (genderFilter !== 'all') {
+      const g = (a.gender || '').toLowerCase();
+      if (genderFilter === 'female' && g !== 'female') return false;
+      if (genderFilter === 'male' && g === 'female') return false;
+    }
+    if (ageFilter !== 'all') {
+      const age = calculateAge(a.date_of_birth);
+      if (age === null) return false;
+      if (ageFilter === '15+' && age < 15) return false;
+      if (ageFilter === '14u' && age >= 15) return false;
+    }
+    return true;
+  };
 
   const buildRecords = (tests) => {
     const records = {};
@@ -1465,6 +1497,7 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
       const entries = [];
       results.forEach(r => {
         if (r.custom_test_id !== test.id) return;
+        if (!filterAthletes(r.athlete_id)) return;
         const a = athletes.find(x => x.id === r.athlete_id);
         if (!a) return;
         const val = parseFloat(r.value); if (isNaN(val)) return;
@@ -1494,20 +1527,40 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
   const gold = '#C8963E';
   const rankColors = [gold, '#A0A0B0', '#A0622A', '#888', '#666'];
 
+  const filterLabel = genderFilter === 'all' && ageFilter === 'all' ? 'TOP 5 ALL-TIME' : 'TOP 5' + (genderFilter === 'male' ? ' BOYS' : genderFilter === 'female' ? ' GIRLS' : '') + (ageFilter === '15+' ? ' 15+' : ageFilter === '14u' ? ' 14 & UNDER' : '');
+
   const renderCard = (test, records, isTv) => {
     const list = records[test.id] || [];
     return (
       <div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ textAlign: 'center', fontSize: isTv ? 14 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: `2px solid ${gold}`, letterSpacing: 1 }}>{test.name}</div>
-        {list.length > 0 ? list.map((r, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: `linear-gradient(90deg, ${gold}44 0%, ${gold}0d 100%)`, borderLeft: `3px solid ${gold}` } : {}) }}>
-            <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: rankColors[i] || '#666' }}>{formatTestValueByDef(test, r.value)}</span>
-            <span style={{ color: '#888', fontSize: isTv ? 12 : 13 }}>{r.name}</span>
-          </div>
-        )) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 8 }}>No data yet</div>}
+        {list.length > 0 ? list.map((r, i) => {
+          const mph = getFlyMPH(test, r.value);
+          return (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: `linear-gradient(90deg, ${gold}44 0%, ${gold}0d 100%)`, borderLeft: `3px solid ${gold}` } : {}) }}>
+              <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: rankColors[i] || '#666' }}>{formatTestValueByDef(test, r.value)}{mph ? <span style={{ color: accentColor, fontSize: isTv ? 10 : 11, fontWeight: 400, marginLeft: 4 }}>{mph} MPH</span> : ''}</span>
+              <span style={{ color: '#888', fontSize: isTv ? 12 : 13 }}>{r.name}</span>
+            </div>
+          );
+        }) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 8 }}>No data yet</div>}
       </div>
     );
   };
+
+  const renderFilterBar = (compact) => (
+    <div style={{ display: 'flex', gap: compact ? 6 : 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+        {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
+          <button key={v} onClick={() => setGenderFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: genderFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: genderFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: genderFilter === v ? accentColor : '#666', fontWeight: genderFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+        {[['all', 'All Ages'], ['15+', '15+'], ['14u', '14 & Under']].map(([v, l]) => (
+          <button key={v} onClick={() => setAgeFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: ageFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: ageFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: ageFilter === v ? accentColor : '#666', fontWeight: ageFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
 
   if (tvMode) {
     return (
@@ -1521,7 +1574,10 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
             )}
             <div style={{ fontSize: 20, fontWeight: 700, color: accentColor, letterSpacing: 3, fontFamily: "'Archivo Black'" }}>{(gym?.name || 'KAIMETRIC').toUpperCase()}</div>
           </div>
-          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: gold }}>RECORD BOARD</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 4, color: gold }}>{filterLabel}</div>
+            {renderFilterBar(true)}
+          </div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT</button>
         </div>
         {speedTests.length > 0 && (<><div style={{ fontSize: 18, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 10, marginBottom: 8 }}>SPEED & POWER</div><div style={{ display: 'grid', gridTemplateColumns: `repeat(${speedTests.length}, 1fr)`, gap: 8, marginBottom: 10 }}>{speedTests.map(t => renderCard(t, speedRecs, true))}</div></>)}
@@ -1536,7 +1592,10 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
         <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>Record Board</h1>
         <button onClick={() => setTvMode(true)} style={{ padding: '10px 16px', background: `linear-gradient(135deg, ${gold} 0%, #A87A2E 100%)`, border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>TV Mode</button>
       </div>
-      <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 24, letterSpacing: 4, fontFamily: "'Archivo Black'", color: gold }}>TOP 5 ALL-TIME</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 4, fontFamily: "'Archivo Black'", color: gold, margin: 0 }}>{filterLabel}</div>
+        {renderFilterBar(false)}
+      </div>
       {speedTests.length > 0 && (<div style={{ marginBottom: 24 }}><div style={{ fontSize: 14, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 12, marginBottom: 12 }}>SPEED & POWER</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>{speedTests.map(t => renderCard(t, speedRecs, false))}</div></div>)}
       {strengthTests.length > 0 && (<div><div style={{ fontSize: 14, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 12, marginBottom: 12 }}>STRENGTH</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>{strengthTests.map(t => renderCard(t, strRecs, false))}</div></div>)}
       {boardTests.length === 0 && <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No tests configured for the record board. Go to Settings to enable them.</div>}
