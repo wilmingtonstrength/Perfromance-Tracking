@@ -587,11 +587,15 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   );
 }
 
-/* ===================== RECENT PRS PAGE ===================== */
+/* ===================== RECENT PRS + RESULTS EXPLORER ===================== */
 function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
+  const [view, setView] = useState('recent');
   const [timeFrame, setTimeFrame] = useState('week');
   const [filterTest, setFilterTest] = useState('');
   const [filterAthlete, setFilterAthlete] = useState(null);
+  const [explorerTest, setExplorerTest] = useState('');
+  const [explorerGender, setExplorerGender] = useState('all');
+
   const now = new Date(); const cutoff = new Date(now);
   if (timeFrame === 'week') cutoff.setDate(cutoff.getDate() - 7);
   else if (timeFrame === 'month') cutoff.setDate(cutoff.getDate() - 30);
@@ -599,17 +603,116 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
   const recentPRs = results.filter(r => r.is_pr && new Date(r.test_date) >= cutoff).filter(r => !filterTest || r.test_id === filterTest).filter(r => !filterAthlete || r.athlete_id === filterAthlete).sort((a, b) => new Date(b.test_date) - new Date(a.test_date));
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
   const timeLabels = { week: '1 Week', month: '1 Month', quarter: '3 Months' };
+
+  const explorerTestDef = explorerTest ? getTestById(explorerTest) : null;
+  const explorerResults = (() => {
+    if (!explorerTest) return [];
+    const prMap = {};
+    results.filter(r => r.test_id === explorerTest).forEach(r => {
+      const val = parseFloat(r.converted_value);
+      if (isNaN(val)) return;
+      const a = athletes.find(x => x.id === r.athlete_id);
+      if (!a) return;
+      if (explorerGender !== 'all') {
+        const g = (a.gender || '').toLowerCase();
+        if (explorerGender === 'female' && g !== 'female') return;
+        if (explorerGender === 'male' && g === 'female') return;
+      }
+      const key = r.athlete_id;
+      if (!prMap[key]) {
+        prMap[key] = { athlete: a, value: val, date: r.test_date };
+      } else {
+        const isBetter = explorerTestDef?.direction === 'lower' ? val < prMap[key].value : val > prMap[key].value;
+        if (isBetter) prMap[key] = { athlete: a, value: val, date: r.test_date };
+      }
+    });
+    const list = Object.values(prMap);
+    list.sort((a, b) => explorerTestDef?.direction === 'lower' ? a.value - b.value : b.value - a.value);
+    return list;
+  })();
+
   return (
     <div>
-      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Recent PRs</h1>
-      <p style={{ color: '#888', marginBottom: 32 }}>See who's been setting personal records</p>
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
-        <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Time Frame</label><div style={{ display: 'flex', gap: 8 }}>{['week', 'month', 'quarter'].map(tf => (<button key={tf} onClick={() => setTimeFrame(tf)} style={{ padding: '12px 24px', background: timeFrame === tf ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: timeFrame === tf ? '#0a1628' : '#aaa', fontWeight: timeFrame === tf ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{timeLabels[tf]}</button>))}</div></div>
-        <div style={{ flex: '1 1 200px', maxWidth: 300 }}><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Person</label><AthleteSearchPicker athletes={athletes} value={filterAthlete} onChange={(id) => setFilterAthlete(id)} placeholder="All people..." /></div>
-        <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={filterTest} onChange={(e) => setFilterTest(e.target.value)} style={{ ...iStyle, width: 220 }}><option value="">All Tests</option>{testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-        <div style={{ padding: '12px 20px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700, fontSize: 18 }}>{recentPRs.length} PR{recentPRs.length !== 1 ? 's' : ''}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>{view === 'recent' ? 'Recent PRs' : 'Results Explorer'}</h1>
+        <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {[['recent', 'Recent PRs'], ['explorer', 'Results Explorer']].map(([v, l]) => (
+            <button key={v} onClick={() => setView(v)} style={{ padding: '10px 20px', background: view === v ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: view === v ? '2px solid #00d4ff' : '2px solid transparent', color: view === v ? '#00d4ff' : '#666', fontWeight: view === v ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{l}</button>
+          ))}
+        </div>
       </div>
-      {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
+
+      {view === 'recent' && (
+        <div>
+          <p style={{ color: '#888', marginBottom: 24 }}>See who's been setting personal records</p>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
+            <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Time Frame</label><div style={{ display: 'flex', gap: 8 }}>{['week', 'month', 'quarter'].map(tf => (<button key={tf} onClick={() => setTimeFrame(tf)} style={{ padding: '12px 24px', background: timeFrame === tf ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: timeFrame === tf ? '#0a1628' : '#aaa', fontWeight: timeFrame === tf ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{timeLabels[tf]}</button>))}</div></div>
+            <div style={{ flex: '1 1 200px', maxWidth: 300 }}><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Person</label><AthleteSearchPicker athletes={athletes} value={filterAthlete} onChange={(id) => setFilterAthlete(id)} placeholder="All people..." /></div>
+            <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={filterTest} onChange={(e) => setFilterTest(e.target.value)} style={{ ...iStyle, width: 220 }}><option value="">All Tests</option>{testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+            <div style={{ padding: '12px 20px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700, fontSize: 18 }}>{recentPRs.length} PR{recentPRs.length !== 1 ? 's' : ''}</div>
+          </div>
+          {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
+        </div>
+      )}
+
+      {view === 'explorer' && (
+        <div>
+          <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 20 }}>Select a test to see every athlete's personal best, ranked from top to bottom. Filter by gender to compare within groups.</p>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
+            <div style={{ flex: '1 1 260px' }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Test</label>
+              <select value={explorerTest} onChange={(e) => setExplorerTest(e.target.value)} style={{ ...iStyle, width: '100%', fontSize: 14 }}>
+                <option value="">Choose a test...</option>
+                {testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Gender</label>
+              <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
+                  <button key={v} onClick={() => setExplorerGender(v)} style={{ padding: '10px 16px', background: explorerGender === v ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: explorerGender === v ? '2px solid #00d4ff' : '2px solid transparent', color: explorerGender === v ? '#00d4ff' : '#666', fontWeight: explorerGender === v ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {explorerTest && <div style={{ padding: '10px 16px', background: 'rgba(0,212,255,0.1)', borderRadius: 8, color: '#00d4ff', fontWeight: 700, fontSize: 14 }}>{explorerResults.length} athletes</div>}
+          </div>
+          {explorerTest && explorerResults.length > 0 ? (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '48px 1fr 80px 120px', gap: 12, padding: '12px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Rank</div>
+                <div style={{ fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Athlete</div>
+                <div style={{ fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, textAlign: 'center' }}>Age</div>
+                <div style={{ fontSize: 11, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, textAlign: 'right' }}>Best</div>
+              </div>
+              {explorerResults.map((row, i) => {
+                const age = calculateAge(row.athlete.birthday);
+                const gold = '#C8963E';
+                const rankColors = [gold, '#A0A0B0', '#A0622A'];
+                const rc = i < 3 ? rankColors[i] : '#666';
+                return (
+                  <div key={row.athlete.id} style={{ display: 'grid', gridTemplateColumns: '48px 1fr 80px 120px', gap: 12, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', ...(i < 3 ? { background: `${rc}08` } : {}) }}>
+                    <div style={{ fontSize: i < 3 ? 20 : 16, color: rc, fontWeight: 700, textAlign: 'center' }}>
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
+                      <div style={{ fontSize: 11, color: '#555' }}>{row.athlete.gender}{row.athlete.type === 'adult' ? ' · Adult' : ''}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', fontSize: 14, color: '#aaa' }}>{age !== null ? age : ''}</div>
+                    <div style={{ textAlign: 'right', fontSize: 18, fontWeight: 800, color: i === 0 ? '#00ff88' : '#00d4ff' }}>
+                      {explorerTestDef ? formatResultWithUnit(explorerTestDef, row.value) : row.value}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : explorerTest ? (
+            <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results for this test yet.</div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>Select a test above to see the leaderboard.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
