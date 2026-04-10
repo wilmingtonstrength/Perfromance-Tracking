@@ -1213,29 +1213,37 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
 
   const getRecentPRs = (athleteId) => {
     const athleteResults = results.filter(r => r.athlete_id === athleteId);
+    const testIds = [...new Set(athleteResults.map(r => r.test_id))];
     const prsByTest = {};
-    athleteResults.forEach(r => {
-      const td = getTestById(r.test_id);
+    testIds.forEach(testId => {
+      const td = getTestById(testId);
       if (!td) return;
-      const testResults = athleteResults.filter(ar => ar.test_id === r.test_id).sort((a, b) => new Date(a.test_date) - new Date(b.test_date));
-      if (testResults.length < 2) return;
-      const vals = testResults.map(tr => ({ date: tr.test_date, value: parseFloat(tr.converted_value), raw: parseFloat(tr.raw_value) })).filter(v => !isNaN(v.value));
+      const vals = athleteResults.filter(ar => ar.test_id === testId)
+        .map(tr => ({ date: tr.test_date, value: parseFloat(tr.converted_value), raw: parseFloat(tr.raw_value) }))
+        .filter(v => !isNaN(v.value))
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
       if (vals.length < 2) return;
       const latest = vals[vals.length - 1];
-      const latestDate = new Date(latest.date);
-      if (latestDate < cutoffDate) return;
-      let bestBefore = null;
+      if (new Date(latest.date) < cutoffDate) return;
+      // Find the baseline: the earliest entry in the reporting window,
+      // or the most recent entry before the window as a starting point.
+      // This captures FULL progress over the period (e.g. 25.5 -> 29.0, not 28.0 -> 29.0)
+      let baseline = null;
+      // First, try to find the most recent entry BEFORE the cutoff (the true starting point)
       for (let i = vals.length - 2; i >= 0; i--) {
-        if (bestBefore === null) { bestBefore = vals[i]; continue; }
-        if (td.direction === 'higher' && vals[i].value > bestBefore.value) bestBefore = vals[i];
-        if (td.direction === 'lower' && vals[i].value < bestBefore.value) bestBefore = vals[i];
+        if (new Date(vals[i].date) < cutoffDate) { baseline = vals[i]; break; }
       }
-      if (!bestBefore) return;
-      const improved = td.direction === 'higher' ? latest.value > bestBefore.value : latest.value < bestBefore.value;
+      // If no entry before cutoff, use the earliest entry in the window
+      if (!baseline) baseline = vals[0];
+      // Skip ties: no improvement means nothing to report (e.g. 1.4 to 1.4)
+      const diff = Math.abs(latest.value - baseline.value);
+      if (diff < 0.001) return;
+      const improved = td.direction === 'higher' ? latest.value > baseline.value : latest.value < baseline.value;
       if (!improved) return;
+      // Only report if latest is actually the all-time best (a real PR)
       const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
       if (latest.value === best) {
-        prsByTest[r.test_id] = { testId: r.test_id, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: bestBefore.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[r.test_id] || '', feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: bestBefore.raw, newRaw: latest.raw };
+        prsByTest[testId] = { testId, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: baseline.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[testId] || '', feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: baseline.raw, newRaw: latest.raw };
       }
     });
     return Object.values(prsByTest);
