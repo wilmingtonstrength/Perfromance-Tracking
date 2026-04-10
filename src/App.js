@@ -388,6 +388,23 @@ function OnboardingPage({ user, onComplete }) {
   const grouped = {};
   presets.forEach(p => { const c = p.category || 'other'; if (!grouped[c]) grouped[c] = []; grouped[c].push(p); });
   const catLabels = { speed: 'Speed & Sprints', agility: 'Agility & COD', strength: 'Strength', power: 'Power & Jumps', other: 'Other' };
+  const catDescriptions = {
+    speed: 'Timed sprints and fly splits. The foundation of any speed development program.',
+    agility: 'Change of direction tests that measure lateral quickness and deceleration ability.',
+    strength: 'Max effort lifts and loaded movements. Track progress on the big compound lifts.',
+    power: 'Jumps, throws, and explosive movements that measure force production and athleticism.',
+    other: 'Additional assessments and specialized tests for your program.'
+  };
+
+  const toggleCategory = (cat) => {
+    const catIds = (grouped[cat] || []).map(p => p.id);
+    const allSelected = catIds.every(id => selectedPresets.includes(id));
+    if (allSelected) {
+      setSelectedPresets(prev => prev.filter(id => !catIds.includes(id)));
+    } else {
+      setSelectedPresets(prev => [...new Set([...prev, ...catIds])]);
+    }
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a1628 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: "'Archivo', sans-serif", color: '#e8e8e8' }}>
@@ -398,15 +415,16 @@ function OnboardingPage({ user, onComplete }) {
           <div style={{ fontSize: 13, color: '#00d4ff', letterSpacing: 2, marginTop: 4 }}>SET UP YOUR PROGRAM</div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 20 }}>
             {[1, 2].map(s => (
-              <div key={s} style={{ width: 40, height: 6, borderRadius: 3, background: step >= s ? '#00d4ff' : 'rgba(255,255,255,0.1)' }} />
+              <div key={s} style={{ width: 40, height: 6, borderRadius: 3, background: step >= s ? primaryColor : 'rgba(255,255,255,0.1)' }} />
             ))}
           </div>
+          <div style={{ fontSize: 12, color: '#666', marginTop: 12 }}>Step {step} of 2</div>
         </div>
 
         {step === 1 && (
           <div>
             <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 8 }}>Name your program</h2>
-            <p style={{ color: '#888', marginBottom: 12 }}>This is what your athletes and coaches will see at the top of the app.</p>
+            <p style={{ color: '#888', marginBottom: 24, lineHeight: 1.5 }}>This is what your athletes and coaches will see at the top of the app. Your program name and brand color make Kaimetric feel like your own platform.</p>
             <div style={{ marginBottom: 24 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Program / Gym Name</label>
               <input type="text" value={gymName} onChange={(e) => setGymName(e.target.value)} placeholder="e.g. North Brunswick Football" style={iStyle} />
@@ -414,32 +432,45 @@ function OnboardingPage({ user, onComplete }) {
             </div>
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Brand Color</label>
-              <p style={{ color: '#666', fontSize: 13, marginBottom: 12, marginTop: 0 }}>This color will be used for buttons, headers, and accents throughout your app.</p>
+              <p style={{ color: '#666', fontSize: 13, marginBottom: 12, marginTop: 0 }}>This color will be used for buttons, headers, and accents throughout your app. Pick your school or program color.</p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {['#00d4ff', '#e63946', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e74c3c', '#3498db', '#ff6b35', '#c0392b', '#27ae60', '#2980b9', '#8e44ad', '#d35400', '#16a085', '#f1c40f', '#e84393', '#6c5ce7', '#00b894', '#fdcb6e', '#e17055', '#0984e3', '#636e72', '#b71540', '#0c2461', '#079992'].map(c => (
                   <div key={c} onClick={() => setPrimaryColor(c)} style={{ width: 44, height: 44, borderRadius: 10, background: c, cursor: 'pointer', border: primaryColor === c ? '3px solid #fff' : '3px solid transparent', transition: 'all 0.15s' }} />
                 ))}
               </div>
+              {primaryColor !== '#00d4ff' && (
+                <div style={{ marginTop: 12, padding: '10px 16px', background: `${primaryColor}15`, borderRadius: 8, border: `1px solid ${primaryColor}30`, fontSize: 13, color: primaryColor }}>
+                  Preview: Your app will use this color for navigation, buttons, and highlights.
+                </div>
+              )}
             </div>
-            <button onClick={() => { if (!gymName.trim()) { alert('Enter a name first'); return; } setStep(2); }} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 18, fontWeight: 800, cursor: 'pointer', letterSpacing: 1 }}>Next: Pick Your Tests</button>
+            <button onClick={() => { if (!gymName.trim()) { alert('Enter a name first'); return; } setStep(2); }} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${primaryColor} 0%, ${primaryColor}cc 100%)`, border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 18, fontWeight: 800, cursor: 'pointer', letterSpacing: 1 }}>Next: Pick Your Tests</button>
           </div>
         )}
 
         {step === 2 && (
           <div>
             <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 8 }}>Pick your tests</h2>
-            <p style={{ color: '#888', marginBottom: 4 }}>Select the performance tests you run with your athletes. Popular tests are pre-selected.</p>
-            <p style={{ color: '#666', fontSize: 13, marginBottom: 8, marginTop: 0 }}>Don't see what you need? You can add custom tests anytime in Settings after setup.</p>
-            <p style={{ color: '#00d4ff', fontSize: 14, marginBottom: 24 }}>{selectedPresets.length} tests selected</p>
+            <div style={{ padding: '16px 20px', background: 'rgba(0,212,255,0.06)', borderRadius: 10, border: '1px solid rgba(0,212,255,0.15)', marginBottom: 20 }}>
+              <p style={{ color: '#ccc', fontSize: 14, margin: '0 0 6px 0', lineHeight: 1.5 }}>Pick the tests you use now. You can always add, remove, or create custom tests later in Settings.</p>
+              <p style={{ color: '#888', fontSize: 13, margin: 0 }}>Popular tests are already selected. Tap to toggle any test on or off.</p>
+            </div>
+            <p style={{ color: primaryColor, fontSize: 14, marginBottom: 24, fontWeight: 600 }}>{selectedPresets.length} tests selected</p>
 
             {categoryOrder.map(cat => grouped[cat] ? (
-              <div key={cat} style={{ marginBottom: 24 }}>
-                <div style={{ fontSize: 12, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 10 }}>{catLabels[cat]}</div>
+              <div key={cat} style={{ marginBottom: 28 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, color: primaryColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>{catLabels[cat]}</div>
+                  <button onClick={() => toggleCategory(cat)} style={{ padding: '4px 10px', background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, color: '#666', cursor: 'pointer', fontSize: 11 }}>
+                    {(grouped[cat] || []).every(p => selectedPresets.includes(p.id)) ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 10, lineHeight: 1.4 }}>{catDescriptions[cat]}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {grouped[cat].map(p => {
                     const active = selectedPresets.includes(p.id);
                     return (
-                      <button key={p.id} onClick={() => togglePreset(p.id)} style={{ padding: '10px 18px', background: active ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: active ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: active ? '#0a1628' : '#aaa', fontWeight: active ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{p.name}</button>
+                      <button key={p.id} onClick={() => togglePreset(p.id)} style={{ padding: '10px 18px', background: active ? `linear-gradient(135deg, ${primaryColor} 0%, ${primaryColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: active ? 'none' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: active ? '#0a1628' : '#aaa', fontWeight: active ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{p.name}</button>
                     );
                   })}
                 </div>
@@ -633,7 +664,7 @@ export default function App() {
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
-    { id: 'recentprs', label: '🔥 Recent PRs' },
+    { id: 'recentprs', label: '🔥 PRs & Results' },
     { id: 'recordboard', label: '🏆 Record Board' },
     { id: 'settings', label: '⚙️ Settings' },
     ...(isAdmin ? [{ id: 'admin', label: '🔒 Admin' }] : []),
@@ -1244,32 +1275,142 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
   );
 }
 
-/* ===================== RECENT PRS ===================== */
+/* ===================== RECENT PRS + RESULTS EXPLORER ===================== */
 function KMRecentPRsPage({ athletes, results, getTestById, customTests, accentColor }) {
+  const [view, setView] = useState('recent'); // 'recent' or 'explorer'
   const [timeFrame, setTimeFrame] = useState('week');
+  const [explorerTest, setExplorerTest] = useState('');
+  const [explorerGender, setExplorerGender] = useState('all');
+
+  // Recent PRs logic
   const now = new Date(); const cutoff = new Date(now);
   if (timeFrame === 'week') cutoff.setDate(cutoff.getDate() - 7);
   else if (timeFrame === 'month') cutoff.setDate(cutoff.getDate() - 30);
   else cutoff.setDate(cutoff.getDate() - 90);
   const prs = results.filter(r => r.is_pr && new Date(r.tested_at) >= cutoff).sort((a, b) => new Date(b.tested_at) - new Date(a.tested_at));
+
+  // Results Explorer logic
+  const explorerTestDef = explorerTest ? getTestById(explorerTest) : null;
+  const explorerResults = (() => {
+    if (!explorerTest) return [];
+    const prMap = {};
+    results.filter(r => r.custom_test_id === explorerTest).forEach(r => {
+      const val = parseFloat(r.value);
+      if (isNaN(val)) return;
+      const a = athletes.find(x => x.id === r.athlete_id);
+      if (!a || a.active === false) return;
+      if (explorerGender !== 'all') {
+        const g = (a.gender || '').toLowerCase();
+        if (explorerGender === 'female' && g !== 'female') return;
+        if (explorerGender === 'male' && g === 'female') return;
+      }
+      const key = r.athlete_id;
+      if (!prMap[key]) {
+        prMap[key] = { athlete: a, value: val, date: r.tested_at };
+      } else {
+        const isBetter = explorerTestDef?.direction === 'lower' ? val < prMap[key].value : val > prMap[key].value;
+        if (isBetter) prMap[key] = { athlete: a, value: val, date: r.tested_at };
+      }
+    });
+    const list = Object.values(prMap);
+    list.sort((a, b) => explorerTestDef?.direction === 'lower' ? a.value - b.value : b.value - a.value);
+    return list;
+  })();
+
+  const iStyle = { padding: '10px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 14 };
+
   return (
     <div>
-      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 24 }}>Recent PRs</h1>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        {['week', 'month', 'quarter'].map(tf => (<button key={tf} onClick={() => setTimeFrame(tf)} style={{ padding: '10px 20px', background: timeFrame === tf ? `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: timeFrame === tf ? '#0a1628' : '#aaa', fontWeight: timeFrame === tf ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{tf === 'week' ? '1 Week' : tf === 'month' ? '1 Month' : '3 Months'}</button>))}
-        <div style={{ padding: '10px 16px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{prs.length} PRs</div>
-      </div>
-      {prs.length > 0 ? (
-        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-          {prs.map(r => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.custom_test_id); return (
-            <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}>
-              <div style={{ fontSize: 24 }}>🏆</div>
-              <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}</div><div style={{ color: '#888', fontSize: 13 }}>{t?.name} · {new Date(r.tested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? formatResultWithUnit(t, r.value) : r.value}</div>
-            </div>
-          ); })}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>{view === 'recent' ? 'Recent PRs' : 'Results Explorer'}</h1>
+        <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {[['recent', 'Recent PRs'], ['explorer', 'Results Explorer']].map(([v, l]) => (
+            <button key={v} onClick={() => setView(v)} style={{ padding: '10px 20px', background: view === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: view === v ? `2px solid ${accentColor}` : '2px solid transparent', color: view === v ? accentColor : '#666', fontWeight: view === v ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{l}</button>
+          ))}
         </div>
-      ) : <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No PRs in this time frame.</div>}
+      </div>
+
+      {view === 'recent' && (
+        <div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+            {['week', 'month', 'quarter'].map(tf => (<button key={tf} onClick={() => setTimeFrame(tf)} style={{ padding: '10px 20px', background: timeFrame === tf ? `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)` : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: timeFrame === tf ? '#0a1628' : '#aaa', fontWeight: timeFrame === tf ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{tf === 'week' ? '1 Week' : tf === 'month' ? '1 Month' : '3 Months'}</button>))}
+            <div style={{ padding: '10px 16px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>{prs.length} PRs</div>
+          </div>
+          {prs.length > 0 ? (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+              {prs.map(r => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.custom_test_id); return (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}>
+                  <div style={{ fontSize: 24 }}>🏆</div>
+                  <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}</div><div style={{ color: '#888', fontSize: 13 }}>{t?.name} · {new Date(r.tested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? formatResultWithUnit(t, r.value) : r.value}</div>
+                </div>
+              ); })}
+            </div>
+          ) : <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No PRs in this time frame.</div>}
+        </div>
+      )}
+
+      {view === 'explorer' && (
+        <div>
+          <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 20 }}>Select a test to see every athlete's personal best, ranked from top to bottom. Filter by gender to compare within groups.</p>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
+            <div style={{ flex: '1 1 260px' }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Test</label>
+              <select value={explorerTest} onChange={(e) => setExplorerTest(e.target.value)} style={{ ...iStyle, width: '100%' }}>
+                <option value="">Choose a test...</option>
+                {customTests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Gender</label>
+              <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
+                  <button key={v} onClick={() => setExplorerGender(v)} style={{ padding: '10px 16px', background: explorerGender === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: explorerGender === v ? `2px solid ${accentColor}` : '2px solid transparent', color: explorerGender === v ? accentColor : '#666', fontWeight: explorerGender === v ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {explorerTest && (
+              <div style={{ padding: '10px 16px', background: `${accentColor}15`, borderRadius: 8, color: accentColor, fontWeight: 700, fontSize: 14 }}>{explorerResults.length} athletes</div>
+            )}
+          </div>
+
+          {explorerTest && explorerResults.length > 0 ? (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '48px 1fr 80px 100px', gap: 12, padding: '12px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Rank</div>
+                <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Athlete</div>
+                <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, textAlign: 'center' }}>Age</div>
+                <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, textAlign: 'right' }}>Best</div>
+              </div>
+              {explorerResults.map((row, i) => {
+                const age = calculateAge(row.athlete.date_of_birth);
+                const gold = '#C8963E';
+                const rankColors = [gold, '#A0A0B0', '#A0622A'];
+                const rc = i < 3 ? rankColors[i] : '#666';
+                return (
+                  <div key={row.athlete.id} style={{ display: 'grid', gridTemplateColumns: '48px 1fr 80px 100px', gap: 12, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', ...(i < 3 ? { background: `${rc}08` } : {}) }}>
+                    <div style={{ fontSize: i < 3 ? 20 : 16, color: rc, fontWeight: 700, textAlign: 'center' }}>
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
+                      <div style={{ fontSize: 11, color: '#555' }}>{row.athlete.gender}{row.athlete.sport ? ' · ' + row.athlete.sport : ''}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', fontSize: 14, color: '#aaa' }}>{age !== null ? age : ''}</div>
+                    <div style={{ textAlign: 'right', fontSize: 18, fontWeight: 800, color: i === 0 ? '#00ff88' : accentColor }}>
+                      {explorerTestDef ? formatResultWithUnit(explorerTestDef, row.value) : row.value}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : explorerTest ? (
+            <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results for this test yet.</div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>Select a test above to see the leaderboard.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1372,7 +1513,14 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: '8px 6px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 6, borderBottom: `4px solid ${accentColor}` }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: accentColor, letterSpacing: 3, fontFamily: "'Archivo Black'" }}>{(gym?.name || 'KAIMETRIC').toUpperCase()}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {gym?.logo_url ? (
+              <img src={gym.logo_url} alt="Logo" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'contain', background: 'rgba(255,255,255,0.1)' }} />
+            ) : (
+              <div style={{ width: 40, height: 40, background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 20, color: '#0a1628' }}>{gym?.logo_letter || 'K'}</div>
+            )}
+            <div style={{ fontSize: 20, fontWeight: 700, color: accentColor, letterSpacing: 3, fontFamily: "'Archivo Black'" }}>{(gym?.name || 'KAIMETRIC').toUpperCase()}</div>
+          </div>
           <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: gold }}>RECORD BOARD</div>
           <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT</button>
         </div>
