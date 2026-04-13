@@ -2000,14 +2000,25 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
 function KMAdminPage({ accentColor }) {
   const [gyms, setGyms] = useState([]);
   const [gymUsers, setGymUsers] = useState([]);
+  const [allAthletes, setAllAthletes] = useState([]);
+  const [allResults, setAllResults] = useState([]);
+  const [allTests, setAllTests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const { data: g } = await supabase.from('gyms').select('*').order('created_at', { ascending: false });
-      const { data: gu } = await supabase.from('gym_users').select('*');
-      if (g) setGyms(g);
-      if (gu) setGymUsers(gu);
+      const [gRes, guRes, athRes, resRes, testRes] = await Promise.all([
+        supabase.from('gyms').select('*').order('created_at', { ascending: false }),
+        supabase.from('gym_users').select('*'),
+        supabase.from('athletes').select('id, gym_id'),
+        supabase.from('test_results').select('id, gym_id'),
+        supabase.from('custom_tests').select('id, gym_id, active'),
+      ]);
+      if (gRes.data) setGyms(gRes.data);
+      if (guRes.data) setGymUsers(guRes.data);
+      if (athRes.data) setAllAthletes(athRes.data);
+      if (resRes.data) setAllResults(resRes.data);
+      if (testRes.data) setAllTests(testRes.data);
       setLoading(false);
     };
     load();
@@ -2018,11 +2029,18 @@ function KMAdminPage({ accentColor }) {
     return owner?.email || '—';
   };
 
+  const getAthleteCount = (gymId) => allAthletes.filter(a => a.gym_id === gymId).length;
+  const getResultCount = (gymId) => allResults.filter(r => r.gym_id === gymId).length;
+  const getTestCount = (gymId) => allTests.filter(t => t.gym_id === gymId && t.active).length;
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
+
+  const totalAthletes = allAthletes.length;
+  const totalResults = allResults.length;
 
   if (loading) return (<div style={{ textAlign: 'center', padding: 48, color: '#888' }}>Loading admin data...</div>);
 
@@ -2031,31 +2049,51 @@ function KMAdminPage({ accentColor }) {
       <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Admin Dashboard</h1>
       <p style={{ color: '#888', marginBottom: 32 }}>All Kaimetric gym signups</p>
 
-      <div style={{ display: 'flex', gap: 16, marginBottom: 28 }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
         <div style={{ padding: '20px 28px', background: `${accentColor}15`, borderRadius: 12, border: `1px solid ${accentColor}30` }}>
           <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: accentColor }}>{gyms.length}</div>
           <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Gyms</div>
         </div>
+        <div style={{ padding: '20px 28px', background: 'rgba(0,255,136,0.08)', borderRadius: 12, border: '1px solid rgba(0,255,136,0.2)' }}>
+          <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{totalAthletes}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Athletes</div>
+        </div>
+        <div style={{ padding: '20px 28px', background: 'rgba(255,165,0,0.08)', borderRadius: 12, border: '1px solid rgba(255,165,0,0.2)' }}>
+          <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#FFA500' }}>{totalResults}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Results</div>
+        </div>
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 16, padding: '14px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 80px 80px 80px 180px', gap: 12, padding: '14px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
           <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Gym Name</div>
           <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Owner Email</div>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Athletes</div>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Results</div>
+          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Tests</div>
           <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Signed Up</div>
         </div>
         {gyms.length === 0 ? (
           <div style={{ padding: 32, textAlign: 'center', color: '#666' }}>No gyms yet.</div>
-        ) : gyms.map(g => (
-          <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 180px', gap: 16, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</div>
-              <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{g.slug}</div>
+        ) : gyms.map(g => {
+          const ath = getAthleteCount(g.id);
+          const res = getResultCount(g.id);
+          const tests = getTestCount(g.id);
+          const hasData = ath > 0 || res > 0;
+          return (
+            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 80px 80px 80px 180px', gap: 12, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', alignItems: 'center', background: hasData ? 'rgba(0,255,136,0.03)' : 'transparent' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</div>
+                <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{g.slug}</div>
+              </div>
+              <div style={{ fontSize: 14, color: '#aaa' }}>{getOwnerEmail(g.id)}</div>
+              <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, color: ath > 0 ? '#00ff88' : '#444' }}>{ath}</div>
+              <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, color: res > 0 ? accentColor : '#444' }}>{res}</div>
+              <div style={{ textAlign: 'center', fontSize: 14, color: tests > 0 ? '#aaa' : '#444' }}>{tests}</div>
+              <div style={{ fontSize: 13, color: '#666' }}>{formatDate(g.created_at)}</div>
             </div>
-            <div style={{ fontSize: 14, color: '#aaa' }}>{getOwnerEmail(g.id)}</div>
-            <div style={{ fontSize: 13, color: '#666' }}>{formatDate(g.created_at)}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
