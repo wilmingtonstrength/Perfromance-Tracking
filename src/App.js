@@ -1153,11 +1153,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
               return (
                 <div key={a.id} onClick={() => { setSelectedAthlete(a.id); setProfileTab('prs'); setSelectedTest(''); }} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 4 }}>
-                    {a.photo_url ? (
-                      <img src={a.photo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
-                    ) : (
-                      <div style={{ width: 36, height: 36, borderRadius: 8, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accentColor }}>{(a.first_name || '').charAt(0)}{(a.last_name || '').charAt(0)}</div>
-                    )}
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accentColor }}>{(a.first_name || '').charAt(0)}{(a.last_name || '').charAt(0)}</div>
                     <h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
                   </div>
                   <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{a.gender && (' · ' + a.gender)}{a.sport && (' · ' + a.sport)}</p>
@@ -1189,37 +1185,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
             ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: 16 }}>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                  <div style={{ position: 'relative' }}>
-                    {athlete.photo_url ? (
-                      <img src={athlete.photo_url} alt="" style={{ width: 64, height: 64, borderRadius: 12, objectFit: 'cover', border: `2px solid ${accentColor}44` }} />
-                    ) : (
-                      <div style={{ width: 64, height: 64, borderRadius: 12, background: `${accentColor}22`, border: `2px solid ${accentColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: accentColor }}>{(athlete.first_name || '').charAt(0)}{(athlete.last_name || '').charAt(0)}</div>
-                    )}
-                    <label style={{ position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#0a1628', fontWeight: 700 }}>
-                      +
-                      <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={async (e) => {
-                        const file = e.target.files[0]; if (!file) return;
-                        if (file.size > 500000) { showNotification('Photo must be under 500KB', 'error'); return; }
-                        const reader = new FileReader();
-                        reader.onload = async (ev) => {
-                          const img = new Image();
-                          img.onload = async () => {
-                            const canvas = document.createElement('canvas');
-                            const max = 200; let w = img.width, h = img.height;
-                            if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
-                            canvas.width = w; canvas.height = h;
-                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-                            const { error } = await supabase.from('athletes').update({ photo_url: dataUrl }).eq('id', athlete.id);
-                            if (!error) { setAthletes(prev => prev.map(a => a.id === athlete.id ? { ...a, photo_url: dataUrl } : a)); showNotification('Photo updated!'); }
-                          };
-                          img.src = ev.target.result;
-                        };
-                        reader.readAsDataURL(file);
-                        e.target.value = '';
-                      }} />
-                    </label>
-                  </div>
+                  <div style={{ width: 64, height: 64, borderRadius: 12, background: `${accentColor}22`, border: `2px solid ${accentColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: accentColor }}>{(athlete.first_name || '').charAt(0)}{(athlete.last_name || '').charAt(0)}</div>
                   <div>
                     <h2 style={{ margin: '0 0 4px 0', fontSize: 28, fontFamily: "'Archivo Black', sans-serif" }}>{athlete.first_name} {athlete.last_name}</h2>
                     <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.date_of_birth) && calculateAge(athlete.date_of_birth) + ' yrs'}{athlete.gender && ' · ' + athlete.gender}{athlete.sport && ' · ' + athlete.sport} · {athleteResults.length} tests</p>
