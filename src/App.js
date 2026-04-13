@@ -720,7 +720,7 @@ export default function App() {
 
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <KMTestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} accentColor={accentColor} />}
-        {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
+        {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} gym={gym} showNotification={showNotification} />}
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
         {page === 'jumpcalc' && <KMJumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
@@ -879,7 +879,7 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
 }
 
 /* ===================== ATHLETES (COMBINED PROFILE) ===================== */
-function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, deleteAthlete, results, setResults, logResults, getPR, getTestById, customTests, getTestsByCategory, deleteResult, updateResult, accentColor, gymId, showNotification }) {
+function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, deleteAthlete, results, setResults, logResults, getPR, getTestById, customTests, getTestsByCategory, deleteResult, updateResult, accentColor, gymId, gym, showNotification }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
