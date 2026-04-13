@@ -1152,7 +1152,14 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
               const age = calculateAge(a.date_of_birth);
               return (
                 <div key={a.id} onClick={() => { setSelectedAthlete(a.id); setProfileTab('prs'); setSelectedTest(''); }} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
-                  <h3 style={{ margin: '0 0 4px 0', fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 4 }}>
+                    {a.photo_url ? (
+                      <img src={a.photo_url} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{ width: 36, height: 36, borderRadius: 8, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accentColor }}>{(a.first_name || '').charAt(0)}{(a.last_name || '').charAt(0)}</div>
+                    )}
+                    <h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
+                  </div>
                   <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{a.gender && (' · ' + a.gender)}{a.sport && (' · ' + a.sport)}</p>
                   <div style={{ marginTop: 12, display: 'flex', gap: 20 }}>
                     <div><span style={{ fontSize: 22, fontWeight: 700, color: accentColor }}>{ar.length}</span> <span style={{ fontSize: 12, color: '#888' }}>tests</span></div>
@@ -1181,11 +1188,72 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
               </div>
             ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: 16 }}>
-                <div>
-                  <h2 style={{ margin: '0 0 4px 0', fontSize: 28, fontFamily: "'Archivo Black', sans-serif" }}>{athlete.first_name} {athlete.last_name}</h2>
-                  <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.date_of_birth) && calculateAge(athlete.date_of_birth) + ' yrs'}{athlete.gender && ' · ' + athlete.gender}{athlete.sport && ' · ' + athlete.sport} · {athleteResults.length} tests</p>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ position: 'relative' }}>
+                    {athlete.photo_url ? (
+                      <img src={athlete.photo_url} alt="" style={{ width: 64, height: 64, borderRadius: 12, objectFit: 'cover', border: `2px solid ${accentColor}44` }} />
+                    ) : (
+                      <div style={{ width: 64, height: 64, borderRadius: 12, background: `${accentColor}22`, border: `2px solid ${accentColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: accentColor }}>{(athlete.first_name || '').charAt(0)}{(athlete.last_name || '').charAt(0)}</div>
+                    )}
+                    <label style={{ position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#0a1628', fontWeight: 700 }}>
+                      +
+                      <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={async (e) => {
+                        const file = e.target.files[0]; if (!file) return;
+                        if (file.size > 500000) { showNotification('Photo must be under 500KB', 'error'); return; }
+                        const reader = new FileReader();
+                        reader.onload = async (ev) => {
+                          const img = new Image();
+                          img.onload = async () => {
+                            const canvas = document.createElement('canvas');
+                            const max = 200; let w = img.width, h = img.height;
+                            if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
+                            canvas.width = w; canvas.height = h;
+                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                            const { error } = await supabase.from('athletes').update({ photo_url: dataUrl }).eq('id', athlete.id);
+                            if (!error) { setAthletes(prev => prev.map(a => a.id === athlete.id ? { ...a, photo_url: dataUrl } : a)); showNotification('Photo updated!'); }
+                          };
+                          img.src = ev.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                        e.target.value = '';
+                      }} />
+                    </label>
+                  </div>
+                  <div>
+                    <h2 style={{ margin: '0 0 4px 0', fontSize: 28, fontFamily: "'Archivo Black', sans-serif" }}>{athlete.first_name} {athlete.last_name}</h2>
+                    <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.date_of_birth) && calculateAge(athlete.date_of_birth) + ' yrs'}{athlete.gender && ' · ' + athlete.gender}{athlete.sport && ' · ' + athlete.sport} · {athleteResults.length} tests</p>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => {
+                    const a = athlete; const age = calculateAge(a.date_of_birth);
+                    const prList = customTests.map(t => { const pr = getPR(a.id, t.id); return pr !== null ? { name: t.name, value: formatResultWithUnit(t, pr), cat: t.category } : null; }).filter(Boolean);
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    const w = 600, rowH = 28, headerH = 120, padBot = 40;
+                    const h = headerH + prList.length * rowH + padBot;
+                    svg.setAttribute('width', w); svg.setAttribute('height', h); svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+                    let s = `<rect width="${w}" height="${h}" fill="#0a1628" rx="16"/>`;
+                    s += `<rect x="0" y="0" width="${w}" height="100" fill="${accentColor}15" rx="16"/>`;
+                    s += `<text x="30" y="42" fill="#fff" font-family="Arial Black,sans-serif" font-size="24" font-weight="900">${a.first_name} ${a.last_name}</text>`;
+                    s += `<text x="30" y="65" fill="#888" font-family="Arial,sans-serif" font-size="14">${age ? age + ' yrs' : ''}${a.gender ? ' · ' + a.gender : ''}${a.sport ? ' · ' + a.sport : ''}</text>`;
+                    s += `<text x="30" y="88" fill="${accentColor}" font-family="Arial,sans-serif" font-size="12" font-weight="700">${prList.length} PERSONAL RECORDS</text>`;
+                    s += `<text x="${w - 30}" y="42" fill="${accentColor}" font-family="Arial Black,sans-serif" font-size="16" text-anchor="end">${(gym?.name || 'KAIMETRIC').toUpperCase()}</text>`;
+                    prList.forEach((pr, i) => {
+                      const y = headerH + i * rowH;
+                      if (i % 2 === 0) s += `<rect x="20" y="${y}" width="${w-40}" height="${rowH}" fill="rgba(255,255,255,0.03)" rx="4"/>`;
+                      s += `<text x="34" y="${y + 19}" fill="#aaa" font-family="Arial,sans-serif" font-size="13">${pr.name}</text>`;
+                      s += `<text x="${w - 34}" y="${y + 19}" fill="#00ff88" font-family="Arial,sans-serif" font-size="13" font-weight="700" text-anchor="end">${pr.value}</text>`;
+                    });
+                    s += `<text x="${w/2}" y="${h - 14}" fill="#444" font-family="Arial,sans-serif" font-size="10" text-anchor="middle">Powered by Kaimetric</text>`;
+                    svg.innerHTML = s;
+                    const svgData = new XMLSerializer().serializeToString(svg);
+                    const canvas = document.createElement('canvas'); canvas.width = w * 2; canvas.height = h * 2;
+                    const ctx = canvas.getContext('2d'); ctx.scale(2, 2);
+                    const img = new Image();
+                    img.onload = () => { ctx.drawImage(img, 0, 0); const link = document.createElement('a'); link.download = `${a.first_name}_${a.last_name}_profile.png`; link.href = canvas.toDataURL('image/png'); link.click(); };
+                    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+                  }} style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.15)', border: '1px solid rgba(0,255,136,0.3)', borderRadius: 6, color: '#00ff88', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Share Card</button>
                   <button onClick={startEdit} style={{ padding: '8px 16px', background: `rgba(0,212,255,0.15)`, border: `1px solid ${accentColor}44`, borderRadius: 6, color: accentColor, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Edit</button>
                   <button onClick={() => { deleteAthlete(athlete.id, athlete.first_name + ' ' + athlete.last_name); setSelectedAthlete(null); }} style={{ padding: '8px 16px', background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff6666', cursor: 'pointer', fontSize: 13 }}>Delete</button>
                 </div>
