@@ -584,6 +584,53 @@ export default function App() {
   if (authState === 'onboarding') return <OnboardingPage user={user} onComplete={handleOnboardingComplete} />;
   if (appLoading) return <div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d4ff', fontSize: 20, fontFamily: "'Archivo', sans-serif" }}>Loading your program...</div>;
 
+  // Subscription / trial check
+  const TRIAL_DAYS = 14;
+  const isAdminUser = user?.email === 'mattsecrest58@gmail.com';
+  const getSubscriptionState = () => {
+    if (isAdminUser) return 'active';
+    if (!gym) return 'active';
+    const status = gym.subscription_status || 'trialing';
+    if (status === 'active') return 'active';
+    if (status === 'trialing' || !gym.subscription_status) {
+      const trialStart = gym.trial_started_at || gym.created_at;
+      if (!trialStart) return 'active';
+      const trialEnd = new Date(trialStart);
+      trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+      if (new Date() < trialEnd) {
+        const daysLeft = Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24));
+        return 'trial_' + daysLeft;
+      }
+      return 'expired';
+    }
+    if (status === 'past_due') return 'past_due';
+    if (status === 'canceled') return 'expired';
+    return 'expired';
+  };
+  const subState = getSubscriptionState();
+  const isTrialing = subState.startsWith('trial_');
+  const trialDaysLeft = isTrialing ? parseInt(subState.split('_')[1]) : 0;
+  const isExpired = subState === 'expired' || subState === 'past_due';
+  const readOnly = isExpired;
+
+  // Show paywall if trial expired and no active subscription
+  if (isExpired && !isAdminUser) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a1628 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: "'Archivo', 'Helvetica Neue', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&display=swap" rel="stylesheet" />
+        <div style={{ maxWidth: 520, padding: 48, textAlign: 'center' }}>
+          <div style={{ width: 72, height: 72, background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 36, color: '#0a1628', marginBottom: 24 }}>K</div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, color: '#fff', marginBottom: 12 }}>Your Free Trial Has Ended</h1>
+          <p style={{ color: '#888', fontSize: 16, lineHeight: 1.6, marginBottom: 8 }}>Your 14 day Kaimetric trial is over, but your data is safe. Subscribe to pick up right where you left off.</p>
+          <p style={{ color: '#666', fontSize: 14, marginBottom: 32 }}>All your athletes, test results, and records are still here waiting for you.</p>
+          <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ display: 'inline-block', width: '100%', padding: '18px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', letterSpacing: 1, textDecoration: 'none', marginBottom: 16 }}>Subscribe Now — $49/month</a>
+          <p style={{ color: '#555', fontSize: 13, marginBottom: 24 }}>Cancel anytime. Your data stays yours.</p>
+          <button onClick={handleLogout} style={{ padding: '10px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#888', cursor: 'pointer', fontSize: 14 }}>Log Out</button>
+        </div>
+      </div>
+    );
+  }
+
   const getTestById = (id) => customTests.find(t => t.id === id) || null;
   const showNotification = (message, type = 'success') => { setNotification({ message, type }); setTimeout(() => setNotification(null), 4000); };
 
@@ -688,6 +735,11 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a1628 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: "'Archivo', 'Helvetica Neue', sans-serif", color: '#e8e8e8' }}>
       <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&display=swap" rel="stylesheet" />
+      {isTrialing && !isAdminUser && trialDaysLeft <= 7 && (
+        <div style={{ background: trialDaysLeft <= 3 ? 'rgba(255,100,100,0.15)' : 'rgba(255,165,0,0.1)', padding: '10px 24px', textAlign: 'center', fontSize: 14, color: trialDaysLeft <= 3 ? '#ff6666' : '#FFA500', fontWeight: 600 }}>
+          {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial. <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ color: '#00d4ff', textDecoration: 'underline', marginLeft: 8 }}>Subscribe now</a> to keep your data.
+        </div>
+      )}
       <header style={{ background: 'rgba(0,0,0,0.4)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 24px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(10px)' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
