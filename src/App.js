@@ -623,7 +623,7 @@ export default function App() {
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, color: '#fff', marginBottom: 12 }}>Your Free Trial Has Ended</h1>
           <p style={{ color: '#888', fontSize: 16, lineHeight: 1.6, marginBottom: 8 }}>Your 14 day Kaimetric trial is over, but your data is safe. Subscribe to pick up right where you left off.</p>
           <p style={{ color: '#666', fontSize: 14, marginBottom: 32 }}>All your athletes, test results, and records are still here waiting for you.</p>
-          <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ display: 'inline-block', width: '100%', padding: '18px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', letterSpacing: 1, textDecoration: 'none', marginBottom: 16 }}>Subscribe Now — $49/month</a>
+          <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ display: 'inline-block', width: '100%', padding: '18px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', letterSpacing: 1, textDecoration: 'none', marginBottom: 16 }}>Subscribe Now — $79/month</a>
           <p style={{ color: '#555', fontSize: 13, marginBottom: 24 }}>Cancel anytime. Your data stays yours.</p>
           <button onClick={handleLogout} style={{ padding: '10px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#888', cursor: 'pointer', fontSize: 14 }}>Log Out</button>
         </div>
