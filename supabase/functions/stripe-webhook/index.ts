@@ -1,8 +1,6 @@
-import "https://esm.sh/@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET")!
-const stripe_key = Deno.env.get("STRIPE_SECRET_KEY")!
 
 // Simple Stripe signature verification
 async function verifySignature(payload: string, sigHeader: string, secret: string): Promise<boolean> {
@@ -58,6 +56,29 @@ Deno.serve(async (req) => {
           stripe_customer_id: customerId,
           subscription_status: "active",
         }).eq("id", gymId)
+
+        // Fire subscription_started event to GA4 via Measurement Protocol
+        const GA4_MEASUREMENT_ID = "G-VYVB68C6YF"
+        const GA4_API_SECRET = Deno.env.get("GA4_API_SECRET")
+        if (GA4_API_SECRET) {
+          try {
+            await fetch(`https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`, {
+              method: "POST",
+              body: JSON.stringify({
+                client_id: gymId,
+                events: [{
+                  name: "subscription_started",
+                  params: {
+                    gym_id: gymId,
+                    stripe_customer_id: customerId,
+                    value: 79,
+                    currency: "USD",
+                  }
+                }]
+              })
+            })
+          } catch (e) { console.error("GA4 MP error:", e) }
+        }
       }
     }
 

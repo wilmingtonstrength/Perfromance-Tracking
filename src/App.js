@@ -5,6 +5,32 @@ const supabaseUrl = 'https://jfyexedcjgerahuumyqu.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmeWV4ZWRjamdlcmFodXVteXF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDc1NzUsImV4cCI6MjA4OTA4MzU3NX0.54fM4aVWV_myuu_alK_OevKTnaqekXABRGT3Qme_2Sc';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+/* ===================== ANALYTICS ===================== */
+const trackEvent = (eventName, params = {}) => {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: eventName, ...params });
+};
+
+const captureUtms = () => {
+  const params = new URLSearchParams(window.location.search);
+  const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+  const utms = {};
+  let hasUtm = false;
+  utmKeys.forEach(key => {
+    const val = params.get(key);
+    if (val) { utms[key] = val; hasUtm = true; }
+  });
+  if (hasUtm) {
+    sessionStorage.setItem('kaimetric_utms', JSON.stringify(utms));
+  }
+  // Also check sessionStorage for UTMs from landing page
+  try {
+    const stored = sessionStorage.getItem('kaimetric_utms');
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return hasUtm ? utms : null;
+};
+
 /* ===================== HELPERS ===================== */
 const formatFeetInches = (totalInches) => {
   if (totalInches === null || totalInches === undefined || isNaN(totalInches)) return '-';
@@ -299,7 +325,7 @@ function LoginPage({ onLogin }) {
         {mode !== 'forgot' && (
           <div style={{ display: 'flex', gap: 0, marginBottom: 28, borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
             {['login', 'signup'].map(m => (
-              <button key={m} onClick={() => { setMode(m); setError(''); setSuccess(''); }} style={{ flex: 1, padding: '12px', background: mode === m ? 'rgba(0,212,255,0.15)' : 'transparent', border: 'none', borderBottom: mode === m ? '2px solid #00d4ff' : '2px solid transparent', color: mode === m ? '#00d4ff' : '#666', fontWeight: mode === m ? 700 : 400, cursor: 'pointer', fontSize: 15, textTransform: 'capitalize' }}>{m === 'login' ? 'Log In' : 'Sign Up'}</button>
+              <button key={m} onClick={() => { setMode(m); setError(''); setSuccess(''); if (m === 'signup') trackEvent('signup_started'); }} style={{ flex: 1, padding: '12px', background: mode === m ? 'rgba(0,212,255,0.15)' : 'transparent', border: 'none', borderBottom: mode === m ? '2px solid #00d4ff' : '2px solid transparent', color: mode === m ? '#00d4ff' : '#666', fontWeight: mode === m ? 700 : 400, cursor: 'pointer', fontSize: 15, textTransform: 'capitalize' }}>{m === 'login' ? 'Log In' : 'Sign Up'}</button>
             ))}
           </div>
         )}
@@ -387,6 +413,19 @@ function OnboardingPage({ user, onComplete }) {
       }));
       await supabase.from('custom_tests').insert(testsToInsert);
     }
+
+    // Save UTMs to gym record
+    const utms = captureUtms();
+    if (utms) {
+      await supabase.from('gyms').update({
+        utm_source: utms.utm_source || null,
+        utm_medium: utms.utm_medium || null,
+        utm_campaign: utms.utm_campaign || null,
+        utm_content: utms.utm_content || null,
+        utm_term: utms.utm_term || null,
+      }).eq('id', gymId);
+    }
+    trackEvent('signup_completed', { gym_name: gymName, tests_selected: selectedPresets.length });
 
     setSaving(false);
     onComplete(gymId);
@@ -536,14 +575,17 @@ export default function App() {
 
   const handleLogin = async (u) => {
     setUser(u);
+    captureUtms(); // Capture UTMs on login too
     const { data: gu } = await supabase.from('gym_users').select('gym_id').eq('user_id', u.id).limit(1);
     if (!gu || gu.length === 0) { setAuthState('onboarding'); return; }
     setGymId(gu[0].gym_id);
+    trackEvent('trial_activated');
     setAuthState('app');
   };
 
   const handleOnboardingComplete = (newGymId) => {
     setGymId(newGymId);
+    trackEvent('trial_activated');
     setAuthState('app');
   };
 
@@ -650,7 +692,7 @@ export default function App() {
       gym_id: gymId, first_name: athlete.firstName, last_name: athlete.lastName,
       date_of_birth: athlete.birthday || null, gender: athlete.gender, sport: athlete.sport || null
     }]).select();
-    if (data) { setAthletes([...athletes, data[0]].sort((a, b) => a.first_name.localeCompare(b.first_name))); showNotification(athlete.firstName + ' added!'); }
+    if (data) { const newList = [...athletes, data[0]].sort((a, b) => a.first_name.localeCompare(b.first_name)); setAthletes(newList); showNotification(athlete.firstName + ' added!'); if (athletes.length === 0) trackEvent('first_athlete_added'); }
     if (error) showNotification('Error: ' + error.message, 'error');
   };
 
