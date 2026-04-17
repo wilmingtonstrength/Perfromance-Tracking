@@ -623,7 +623,7 @@ export default function App() {
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, color: '#fff', marginBottom: 12 }}>Your Free Trial Has Ended</h1>
           <p style={{ color: '#888', fontSize: 16, lineHeight: 1.6, marginBottom: 8 }}>Your 14 day Kaimetric trial is over, but your data is safe. Subscribe to pick up right where you left off.</p>
           <p style={{ color: '#666', fontSize: 14, marginBottom: 32 }}>All your athletes, test results, and records are still here waiting for you.</p>
-          <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ display: 'inline-block', width: '100%', padding: '18px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', letterSpacing: 1, textDecoration: 'none', marginBottom: 16 }}>Subscribe Now — $79/month</a>
+          <a href={'https://buy.stripe.com/9B6dR8gKPbBK1Ny9io8EM00i?client_reference_id=' + gymId} style={{ display: 'inline-block', width: '100%', padding: '18px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', letterSpacing: 1, textDecoration: 'none', marginBottom: 16 }}>Subscribe Now — $79/month</a>
           <p style={{ color: '#555', fontSize: 13, marginBottom: 24 }}>Cancel anytime. Your data stays yours.</p>
           <button onClick={handleLogout} style={{ padding: '10px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#888', cursor: 'pointer', fontSize: 14 }}>Log Out</button>
         </div>
@@ -737,7 +737,7 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&display=swap" rel="stylesheet" />
       {isTrialing && !isAdminUser && trialDaysLeft <= 7 && (
         <div style={{ background: trialDaysLeft <= 3 ? 'rgba(255,100,100,0.15)' : 'rgba(255,165,0,0.1)', padding: '10px 24px', textAlign: 'center', fontSize: 14, color: trialDaysLeft <= 3 ? '#ff6666' : '#FFA500', fontWeight: 600 }}>
-          {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial. <a href={'https://buy.stripe.com/test_PLACEHOLDER?client_reference_id=' + gymId} style={{ color: '#00d4ff', textDecoration: 'underline', marginLeft: 8 }}>Subscribe now</a> to keep your data.
+          {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial. <a href={'https://buy.stripe.com/9B6dR8gKPbBK1Ny9io8EM00i?client_reference_id=' + gymId} style={{ color: '#00d4ff', textDecoration: 'underline', marginLeft: 8 }}>Subscribe now</a> to keep your data.
         </div>
       )}
       <header style={{ background: 'rgba(0,0,0,0.4)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 24px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(10px)' }}>
@@ -2063,7 +2063,7 @@ function KMAdminPage({ accentColor }) {
         supabase.from('gyms').select('*').order('created_at', { ascending: false }),
         supabase.from('gym_users').select('*'),
         supabase.from('athletes').select('id, gym_id'),
-        supabase.from('test_results').select('id, gym_id'),
+        supabase.from('test_results').select('id, gym_id, created_at'),
         supabase.from('custom_tests').select('id, gym_id, active'),
       ]);
       if (gRes.data) setGyms(gRes.data);
@@ -2085,14 +2085,89 @@ function KMAdminPage({ accentColor }) {
   const getResultCount = (gymId) => allResults.filter(r => r.gym_id === gymId).length;
   const getTestCount = (gymId) => allTests.filter(t => t.gym_id === gymId && t.active).length;
 
+  const getLastActive = (gymId) => {
+    const gymResults = allResults.filter(r => r.gym_id === gymId);
+    if (gymResults.length === 0) return null;
+    return gymResults.reduce((latest, r) => {
+      const d = new Date(r.created_at);
+      return d > latest ? d : latest;
+    }, new Date(0));
+  };
+
+  const getTrialDaysLeft = (gym) => {
+    if (gym.subscription_status === 'active') return null;
+    const trialStart = new Date(gym.trial_started_at || gym.created_at);
+    const trialEnd = new Date(trialStart.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+    return daysLeft;
+  };
+
+  const getSubStatus = (gym) => {
+    if (gym.subscription_status === 'active') return 'active';
+    if (gym.subscription_status === 'past_due') return 'past_due';
+    if (gym.subscription_status === 'canceled') return 'canceled';
+    const daysLeft = getTrialDaysLeft(gym);
+    if (daysLeft !== null && daysLeft > 0) return 'trial';
+    return 'expired';
+  };
+
+  const getHealthColor = (gym) => {
+    const status = getSubStatus(gym);
+    const ath = getAthleteCount(gym.id);
+    const res = getResultCount(gym.id);
+    const lastActive = getLastActive(gym.id);
+    const daysSinceActive = lastActive ? Math.floor((new Date() - lastActive) / (1000 * 60 * 60 * 24)) : null;
+
+    if (status === 'active' && res > 0 && daysSinceActive !== null && daysSinceActive <= 7) return '#00ff88';
+    if (status === 'expired' || status === 'canceled') return '#ff4444';
+    if (status === 'trial') {
+      const daysLeft = getTrialDaysLeft(gym);
+      if (daysLeft <= 3 && res === 0) return '#ff4444';
+      if (ath > 0 && res > 0) return '#00ff88';
+      if (ath > 0 || res > 0) return '#FFA500';
+      return '#ff4444';
+    }
+    if (status === 'past_due') return '#FFA500';
+    if (res > 0 && daysSinceActive !== null && daysSinceActive <= 14) return '#00ff88';
+    if (ath > 0) return '#FFA500';
+    return '#ff4444';
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
 
+  const formatShortDate = (date) => {
+    if (!date) return '—';
+    const now = new Date();
+    const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const statusBadge = (gym) => {
+    const status = getSubStatus(gym);
+    const daysLeft = getTrialDaysLeft(gym);
+    const styles = {
+      trial: { bg: 'rgba(0,212,255,0.15)', color: '#00d4ff', text: `Trial (${daysLeft}d)` },
+      active: { bg: 'rgba(0,255,136,0.15)', color: '#00ff88', text: 'Active' },
+      past_due: { bg: 'rgba(255,165,0,0.15)', color: '#FFA500', text: 'Past Due' },
+      expired: { bg: 'rgba(255,68,68,0.15)', color: '#ff4444', text: 'Expired' },
+      canceled: { bg: 'rgba(255,68,68,0.15)', color: '#ff4444', text: 'Canceled' },
+    };
+    const s = styles[status] || styles.expired;
+    return (<span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700, background: s.bg, color: s.color }}>{s.text}</span>);
+  };
+
   const totalAthletes = allAthletes.length;
   const totalResults = allResults.length;
+  const activeGyms = gyms.filter(g => getSubStatus(g) === 'active').length;
+  const trialGyms = gyms.filter(g => getSubStatus(g) === 'trial').length;
 
   if (loading) return (<div style={{ textAlign: 'center', padding: 48, color: '#888' }}>Loading admin data...</div>);
 
@@ -2106,6 +2181,14 @@ function KMAdminPage({ accentColor }) {
           <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: accentColor }}>{gyms.length}</div>
           <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Gyms</div>
         </div>
+        <div style={{ padding: '20px 28px', background: 'rgba(0,212,255,0.08)', borderRadius: 12, border: '1px solid rgba(0,212,255,0.2)' }}>
+          <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00d4ff' }}>{trialGyms}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>On Trial</div>
+        </div>
+        <div style={{ padding: '20px 28px', background: 'rgba(0,255,136,0.08)', borderRadius: 12, border: '1px solid rgba(0,255,136,0.2)' }}>
+          <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{activeGyms}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Paid Active</div>
+        </div>
         <div style={{ padding: '20px 28px', background: 'rgba(0,255,136,0.08)', borderRadius: 12, border: '1px solid rgba(0,255,136,0.2)' }}>
           <div style={{ fontSize: 36, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{totalAthletes}</div>
           <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Total Athletes</div>
@@ -2117,32 +2200,36 @@ function KMAdminPage({ accentColor }) {
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 80px 80px 80px 180px', gap: 12, padding: '14px 24px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Gym Name</div>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Owner Email</div>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Athletes</div>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Results</div>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Tests</div>
-          <div style={{ fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Signed Up</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '12px 1.3fr 1.3fr 90px 70px 70px 90px 100px', gap: 10, padding: '14px 20px', borderBottom: '2px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
+          <div></div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Gym</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Owner</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Status</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Athletes</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700, textAlign: 'center' }}>Results</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Last Active</div>
+          <div style={{ fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Signed Up</div>
         </div>
         {gyms.length === 0 ? (
           <div style={{ padding: 32, textAlign: 'center', color: '#666' }}>No gyms yet.</div>
         ) : gyms.map(g => {
           const ath = getAthleteCount(g.id);
           const res = getResultCount(g.id);
-          const tests = getTestCount(g.id);
-          const hasData = ath > 0 || res > 0;
+          const lastActive = getLastActive(g.id);
+          const healthColor = getHealthColor(g);
           return (
-            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.5fr 80px 80px 80px 180px', gap: 12, padding: '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', alignItems: 'center', background: hasData ? 'rgba(0,255,136,0.03)' : 'transparent' }}>
+            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '12px 1.3fr 1.3fr 90px 70px 70px 90px 100px', gap: 10, padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', alignItems: 'center' }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: healthColor, boxShadow: `0 0 6px ${healthColor}88` }}></div>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{g.name}</div>
-                <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{g.slug}</div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{g.name}</div>
+                <div style={{ fontSize: 11, color: '#555', marginTop: 1 }}>{g.slug}</div>
               </div>
-              <div style={{ fontSize: 14, color: '#aaa' }}>{getOwnerEmail(g.id)}</div>
-              <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, color: ath > 0 ? '#00ff88' : '#444' }}>{ath}</div>
-              <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, color: res > 0 ? accentColor : '#444' }}>{res}</div>
-              <div style={{ textAlign: 'center', fontSize: 14, color: tests > 0 ? '#aaa' : '#444' }}>{tests}</div>
-              <div style={{ fontSize: 13, color: '#666' }}>{formatDate(g.created_at)}</div>
+              <div style={{ fontSize: 13, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getOwnerEmail(g.id)}</div>
+              <div>{statusBadge(g)}</div>
+              <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: ath > 0 ? '#00ff88' : '#444' }}>{ath}</div>
+              <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: res > 0 ? accentColor : '#444' }}>{res}</div>
+              <div style={{ fontSize: 13, color: '#888' }}>{formatShortDate(lastActive)}</div>
+              <div style={{ fontSize: 12, color: '#666' }}>{formatDate(g.created_at).split(' ').slice(0, 3).join(' ')}</div>
             </div>
           );
         })}
