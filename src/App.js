@@ -9,6 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const trackEvent = (eventName, params = {}) => {
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push({ event: eventName, ...params });
+  try { console.log('%c[Kaimetric Analytics] ' + eventName + ' fired', 'color:#00d4ff;font-weight:bold', params); } catch (e) {}
 };
 
 const captureUtms = () => {

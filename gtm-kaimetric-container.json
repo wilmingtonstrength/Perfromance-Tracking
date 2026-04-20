@@ -1,0 +1,297 @@
+{
+  "exportFormatVersion": 2,
+  "exportTime": "2026-04-20 12:00:00",
+  "containerVersion": {
+    "path": "accounts/0/containers/0/versions/0",
+    "accountId": "0",
+    "containerId": "0",
+    "containerVersionId": "0",
+    "container": {
+      "path": "accounts/0/containers/0",
+      "accountId": "0",
+      "containerId": "0",
+      "name": "Kaimetric",
+      "publicId": "GTM-MNM8TX92",
+      "usageContext": ["WEB"],
+      "fingerprint": "0",
+      "tagManagerUrl": "https://tagmanager.google.com/#/container/accounts/0/containers/0/workspaces?apiLink=container",
+      "features": {
+        "supportUserPermissions": true,
+        "supportEnvironments": true,
+        "supportWorkspaces": true,
+        "supportGtagConfigs": true,
+        "supportBuiltInVariables": true,
+        "supportClients": true,
+        "supportFolders": true,
+        "supportTags": true,
+        "supportTemplates": true,
+        "supportTriggers": true,
+        "supportVariables": true,
+        "supportVersions": true,
+        "supportZones": true,
+        "supportTransformations": true
+      },
+      "tagIds": ["GTM-MNM8TX92"]
+    },
+    "tag": [
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "10",
+        "name": "GA4 - cta_click",
+        "type": "gaawe",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "eventName", "value": "cta_click"},
+          {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
+          {"type": "LIST", "key": "eventParameters", "list": [
+            {"type": "MAP", "map": [
+              {"type": "TEMPLATE", "key": "name", "value": "cta_text"},
+              {"type": "TEMPLATE", "key": "value", "value": "{{DLV - cta_text}}"}
+            ]},
+            {"type": "MAP", "map": [
+              {"type": "TEMPLATE", "key": "name", "value": "cta_location"},
+              {"type": "TEMPLATE", "key": "value", "value": "{{DLV - cta_location}}"}
+            ]}
+          ]},
+          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["100"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "11",
+        "name": "GA4 - signup_started",
+        "type": "gaawe",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "eventName", "value": "signup_started"},
+          {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
+          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["101"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "12",
+        "name": "GA4 - signup_completed",
+        "type": "gaawe",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "eventName", "value": "signup_completed"},
+          {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
+          {"type": "LIST", "key": "eventParameters", "list": [
+            {"type": "MAP", "map": [
+              {"type": "TEMPLATE", "key": "name", "value": "gym_name"},
+              {"type": "TEMPLATE", "key": "value", "value": "{{DLV - gym_name}}"}
+            ]},
+            {"type": "MAP", "map": [
+              {"type": "TEMPLATE", "key": "name", "value": "tests_selected"},
+              {"type": "TEMPLATE", "key": "value", "value": "{{DLV - tests_selected}}"}
+            ]}
+          ]},
+          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["102"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "13",
+        "name": "GA4 - trial_activated",
+        "type": "gaawe",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "eventName", "value": "trial_activated"},
+          {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
+          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["103"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "14",
+        "name": "GA4 - first_athlete_added",
+        "type": "gaawe",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "eventName", "value": "first_athlete_added"},
+          {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
+          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["104"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "tagId": "15",
+        "name": "GA4 Config",
+        "type": "googtag",
+        "parameter": [
+          {"type": "TEMPLATE", "key": "tagId", "value": "G-VYVB68C6YF"}
+        ],
+        "fingerprint": "0",
+        "firingTriggerId": ["2147479553"],
+        "tagFiringOption": "ONCE_PER_EVENT",
+        "monitoringMetadata": {"type": "MAP"},
+        "consentSettings": {"consentStatus": "NOT_SET"}
+      }
+    ],
+    "trigger": [
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "triggerId": "100",
+        "name": "CE - cta_click",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {"type": "EQUALS", "parameter": [
+            {"type": "TEMPLATE", "key": "arg0", "value": "{{_event}}"},
+            {"type": "TEMPLATE", "key": "arg1", "value": "cta_click"}
+          ]}
+        ],
+        "fingerprint": "0"
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "triggerId": "101",
+        "name": "CE - signup_started",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {"type": "EQUALS", "parameter": [
+            {"type": "TEMPLATE", "key": "arg0", "value": "{{_event}}"},
+            {"type": "TEMPLATE", "key": "arg1", "value": "signup_started"}
+          ]}
+        ],
+        "fingerprint": "0"
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "triggerId": "102",
+        "name": "CE - signup_completed",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {"type": "EQUALS", "parameter": [
+            {"type": "TEMPLATE", "key": "arg0", "value": "{{_event}}"},
+            {"type": "TEMPLATE", "key": "arg1", "value": "signup_completed"}
+          ]}
+        ],
+        "fingerprint": "0"
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "triggerId": "103",
+        "name": "CE - trial_activated",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {"type": "EQUALS", "parameter": [
+            {"type": "TEMPLATE", "key": "arg0", "value": "{{_event}}"},
+            {"type": "TEMPLATE", "key": "arg1", "value": "trial_activated"}
+          ]}
+        ],
+        "fingerprint": "0"
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "triggerId": "104",
+        "name": "CE - first_athlete_added",
+        "type": "CUSTOM_EVENT",
+        "customEventFilter": [
+          {"type": "EQUALS", "parameter": [
+            {"type": "TEMPLATE", "key": "arg0", "value": "{{_event}}"},
+            {"type": "TEMPLATE", "key": "arg1", "value": "first_athlete_added"}
+          ]}
+        ],
+        "fingerprint": "0"
+      }
+    ],
+    "variable": [
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "variableId": "20",
+        "name": "DLV - cta_text",
+        "type": "v",
+        "parameter": [
+          {"type": "INTEGER", "key": "dataLayerVersion", "value": "2"},
+          {"type": "BOOLEAN", "key": "setDefaultValue", "value": "false"},
+          {"type": "TEMPLATE", "key": "name", "value": "cta_text"}
+        ],
+        "fingerprint": "0",
+        "formatValue": {}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "variableId": "21",
+        "name": "DLV - cta_location",
+        "type": "v",
+        "parameter": [
+          {"type": "INTEGER", "key": "dataLayerVersion", "value": "2"},
+          {"type": "BOOLEAN", "key": "setDefaultValue", "value": "false"},
+          {"type": "TEMPLATE", "key": "name", "value": "cta_location"}
+        ],
+        "fingerprint": "0",
+        "formatValue": {}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "variableId": "22",
+        "name": "DLV - gym_name",
+        "type": "v",
+        "parameter": [
+          {"type": "INTEGER", "key": "dataLayerVersion", "value": "2"},
+          {"type": "BOOLEAN", "key": "setDefaultValue", "value": "false"},
+          {"type": "TEMPLATE", "key": "name", "value": "gym_name"}
+        ],
+        "fingerprint": "0",
+        "formatValue": {}
+      },
+      {
+        "accountId": "0",
+        "containerId": "0",
+        "variableId": "23",
+        "name": "DLV - tests_selected",
+        "type": "v",
+        "parameter": [
+          {"type": "INTEGER", "key": "dataLayerVersion", "value": "2"},
+          {"type": "BOOLEAN", "key": "setDefaultValue", "value": "false"},
+          {"type": "TEMPLATE", "key": "name", "value": "tests_selected"}
+        ],
+        "fingerprint": "0",
+        "formatValue": {}
+      }
+    ],
+    "builtInVariable": [
+      {"accountId": "0", "containerId": "0", "type": "PAGE_URL", "name": "Page URL"},
+      {"accountId": "0", "containerId": "0", "type": "PAGE_HOSTNAME", "name": "Page Hostname"},
+      {"accountId": "0", "containerId": "0", "type": "PAGE_PATH", "name": "Page Path"},
+      {"accountId": "0", "containerId": "0", "type": "EVENT", "name": "Event"}
+    ],
+    "fingerprint": "0",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/0/containers/0/versions/0?apiLink=version"
+  }
+}
