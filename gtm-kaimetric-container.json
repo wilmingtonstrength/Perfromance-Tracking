@@ -53,7 +53,7 @@
               {"type": "TEMPLATE", "key": "value", "value": "{{DLV - cta_location}}"}
             ]}
           ]},
-          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+          {"type": "TEMPLATE", "key": "measurementIdOverride", "value": "G-VYVB68C6YF"}
         ],
         "fingerprint": "0",
         "firingTriggerId": ["100"],
@@ -70,7 +70,7 @@
         "parameter": [
           {"type": "TEMPLATE", "key": "eventName", "value": "signup_started"},
           {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
-          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+          {"type": "TEMPLATE", "key": "measurementIdOverride", "value": "G-VYVB68C6YF"}
         ],
         "fingerprint": "0",
         "firingTriggerId": ["101"],
@@ -97,7 +97,7 @@
               {"type": "TEMPLATE", "key": "value", "value": "{{DLV - tests_selected}}"}
             ]}
           ]},
-          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+          {"type": "TEMPLATE", "key": "measurementIdOverride", "value": "G-VYVB68C6YF"}
         ],
         "fingerprint": "0",
         "firingTriggerId": ["102"],
@@ -114,7 +114,7 @@
         "parameter": [
           {"type": "TEMPLATE", "key": "eventName", "value": "trial_activated"},
           {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
-          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+          {"type": "TEMPLATE", "key": "measurementIdOverride", "value": "G-VYVB68C6YF"}
         ],
         "fingerprint": "0",
         "firingTriggerId": ["103"],
@@ -131,7 +131,7 @@
         "parameter": [
           {"type": "TEMPLATE", "key": "eventName", "value": "first_athlete_added"},
           {"type": "BOOLEAN", "key": "sendEcommerceData", "value": "false"},
-          {"type": "TAG_REFERENCE", "key": "measurementId", "value": "{{GA4 Config}}"}
+          {"type": "TEMPLATE", "key": "measurementIdOverride", "value": "G-VYVB68C6YF"}
         ],
         "fingerprint": "0",
         "firingTriggerId": ["104"],
