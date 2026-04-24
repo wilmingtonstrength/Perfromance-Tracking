@@ -1384,6 +1384,12 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     if (pr.feetInches) return formatFeetInches(diff) + ' further';
     return diff.toFixed(1) + ' better';
   };
+  const pctText = (pr) => {
+    if (pr.oldValue === 0) return '';
+    const pct = Math.round(Math.abs(pr.newValue - pr.oldValue) / Math.abs(pr.oldValue) * 100);
+    if (pct < 1) return '';
+    return pct + '%';
+  };
 
   const generateMessage = (athleteData) => {
     const a = athleteData.athlete;
@@ -1391,8 +1397,10 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     const name = a.first_name;
     let msg = `Hey! Just wanted to give you a quick progress update on ${name}. Over the last few months ${name} has been putting in great work and it's showing:\n\n`;
     prs.forEach(pr => {
-      const desc = pr.description ? ` — ${pr.description}` : '';
-      msg += `- ${pr.testName}: improved from ${formatOldVal(pr)} to ${formatVal(pr)} (${improvementText(pr)})${desc}\n`;
+      const desc = pr.description ? ` (${pr.description})` : '';
+      const pct = pctText(pr);
+      const pctPart = pct ? `, that's up ${pct} from last test` : '';
+      msg += `${pr.testName}: ${formatVal(pr)}, up from ${formatOldVal(pr)}${pctPart}${desc}\n`;
     });
     msg += `\n${name} is making real progress. Keep up the great work!`;
     return msg;
@@ -1481,7 +1489,10 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {athleteData.prs.map(pr => (
               <div key={pr.testId} style={{ background: 'rgba(0,255,136,0.06)', borderRadius: 10, padding: '16px 20px', border: '1px solid rgba(0,255,136,0.2)' }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88', marginBottom: 4 }}>{pr.testName}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88' }}>{pr.testName}</div>
+                  {pctText(pr) && <div style={{ padding: '2px 8px', background: 'rgba(0,255,136,0.15)', borderRadius: 4, color: '#00ff88', fontSize: 13, fontWeight: 700 }}>+{pctText(pr)}</div>}
+                </div>
                 {pr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ color: '#666', fontSize: 16 }}>{formatOldVal(pr)}</span>
@@ -1522,6 +1533,45 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
           {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
         </div>
       </div>
+
+      {/* Quarterly Tracker */}
+      {(() => {
+        const now = new Date();
+        const q = Math.floor(now.getMonth() / 3) + 1;
+        const qStart = new Date(now.getFullYear(), (q - 1) * 3, 1);
+        const qLabels = { 1: 'Jan\u2013Mar', 2: 'Apr\u2013Jun', 3: 'Jul\u2013Sep', 4: 'Oct\u2013Dec' };
+        const sentThisQ = sentReports.filter(sr => new Date(sr.sent_at) >= qStart);
+        const sentIds = new Set(sentThisQ.map(sr => sr.athlete_id));
+        const totalYouth = youthAthletes.length;
+        const sentCount = sentIds.size;
+        const pct = totalYouth > 0 ? Math.round(sentCount / totalYouth * 100) : 0;
+        const needCount = totalYouth - sentCount;
+        return (
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.08)', marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 14, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Q{q} {now.getFullYear()} Progress Report Tracker ({qLabels[q]})</h3>
+              <span style={{ fontSize: 13, color: '#888' }}>{sentCount}/{totalYouth} athletes ({pct}%)</span>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, height: 12, overflow: 'hidden', marginBottom: 12 }}>
+              <div style={{ width: pct + '%', height: '100%', background: 'linear-gradient(90deg, #00ff88 0%, #00d4ff 100%)', borderRadius: 8, transition: 'width 0.5s' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.1)', borderRadius: 8, flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#00ff88' }}>{sentCount}</div>
+                <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Sent</div>
+              </div>
+              <div style={{ padding: '8px 16px', background: 'rgba(255,165,0,0.1)', borderRadius: 8, flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#FFA500' }}>{needCount}</div>
+                <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Remaining</div>
+              </div>
+              <div style={{ padding: '8px 16px', background: 'rgba(0,212,255,0.1)', borderRadius: 8, flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#00d4ff' }}>{flaggedAthletes.filter(a => !sentIds.has(a.athlete.id)).length}</div>
+                <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase' }}>Ready Now</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {flaggedAthletes.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes with {minPRs}+ PRs in the last {daysBack} days.</p><p style={{ fontSize: 13 }}>Try lowering the minimum PRs or increasing the time range.</p></div>
