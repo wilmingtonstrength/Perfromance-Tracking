@@ -1343,6 +1343,9 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
       if (diff < 0.001) return;
       const improved = td.direction === 'higher' ? latest.value > baseline.value : latest.value < baseline.value;
       if (!improved) return;
+      // Skip improvements under 5% — not worth reporting to parents
+      const pctChange = baseline.value !== 0 ? Math.round(Math.abs(latest.value - baseline.value) / Math.abs(baseline.value) * 100) : 0;
+      if (pctChange < 5) return;
       // Only report if latest is actually the all-time best (a real PR)
       const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
       if (latest.value === best) {
@@ -1352,7 +1355,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     return Object.values(prsByTest);
   };
 
-  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete' && (a.status || '').toLowerCase() !== 'inactive');
   const flaggedAthletes = youthAthletes.map(a => {
     const prs = getRecentPRs(a.id);
     const lastSent = sentReports.find(sr => sr.athlete_id === a.id);
