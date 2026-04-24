@@ -1355,7 +1355,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     return Object.values(prsByTest);
   };
 
-  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete' && (a.status || '').toLowerCase() !== 'inactive');
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
   const flaggedAthletes = youthAthletes.map(a => {
     const prs = getRecentPRs(a.id);
     const lastSent = sentReports.find(sr => sr.athlete_id === a.id);
