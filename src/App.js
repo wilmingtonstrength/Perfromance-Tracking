@@ -67,6 +67,34 @@ const applyConversion = (testDef, rawValue) => {
   } catch { return rawValue; }
 };
 
+/* ===================== MULTI-REP (RSA SHUTTLE) HELPERS ===================== */
+const isMultiRepTest = (testDef) => {
+  if (!testDef) return false;
+  if (testDef.multi_rep === true) return true;
+  if (testDef.id === 'rsa_shuttle') return true;
+  return false;
+};
+const getMultiRepCount = (testDef) => {
+  if (!testDef) return 0;
+  if (testDef.rep_count) return parseInt(testDef.rep_count);
+  if (testDef.id === 'rsa_shuttle') return 6;
+  return 0;
+};
+const computeRsaStats = (reps) => {
+  const nums = reps.map(r => parseFloat(r)).filter(v => !isNaN(v) && v > 0);
+  if (nums.length === 0) return null;
+  const best = Math.min(...nums);
+  const avg = nums.reduce((s, v) => s + v, 0) / nums.length;
+  const drop = best > 0 ? ((avg - best) / best) * 100 : 0;
+  return { best: parseFloat(best.toFixed(3)), avg: parseFloat(avg.toFixed(3)), drop: parseFloat(drop.toFixed(2)) };
+};
+const dropOffColor = (pct) => {
+  if (pct === null || pct === undefined || isNaN(pct)) return '#888';
+  if (pct < 5) return '#00ff88';
+  if (pct < 10) return '#FFA500';
+  return '#ff6666';
+};
+
 /* ===================== ATHLETE SCORE (TSA) ===================== */
 const TSA_TEST_IDS = [
   { id: 'vertical_jump', label: 'Vertical Jump', direction: 'higher', unit: 'in' },
@@ -306,7 +334,14 @@ export default function App() {
         const best = td.direction === 'higher' ? Math.max(...prev.map(r => parseFloat(r.converted_value))) : Math.min(...prev.map(r => parseFloat(r.converted_value)));
         isPR = td.direction === 'higher' ? result.convertedValue > best : result.convertedValue < best;
       }
-      const { data } = await supabase.from('results').insert([{ athlete_id: result.athleteId, test_id: result.testId, test_date: result.testDate, raw_value: result.rawValue, converted_value: result.convertedValue, unit: result.unit, is_pr: isPR }]).select();
+      const insertRow = { athlete_id: result.athleteId, test_id: result.testId, test_date: result.testDate, raw_value: result.rawValue, converted_value: result.convertedValue, unit: result.unit, is_pr: isPR };
+      if (Array.isArray(result.reps) && result.reps.length > 0) {
+        insertRow.reps = result.reps;
+        insertRow.best_time = result.bestTime;
+        insertRow.avg_time = result.avgTime;
+        insertRow.drop_off_pct = result.dropOffPct;
+      }
+      const { data } = await supabase.from('results').insert([insertRow]).select();
       if (data) { newResults.push(data[0]); if (isPR) prCount++; }
     }
     setResults([...results, ...newResults]);
@@ -390,29 +425,58 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
 
   const testSet = getTestsForType(entryMode);
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.allow_kg; });
+  const initValForTest = (tid) => { const t = getTestById(tid); if (isMultiRepTest(t)) return Array(getMultiRepCount(t)).fill(''); return ''; };
   const toggleTest = (testId) => {
     if (selectedTests.includes(testId)) { setSelectedTests(selectedTests.filter(t => t !== testId)); setAthleteRows(athleteRows.map(row => { const nv = { ...row.values }; delete nv[testId]; return { ...row, values: nv }; })); }
-    else { setSelectedTests([...selectedTests, testId]); setAthleteRows(athleteRows.map(row => ({ ...row, values: { ...row.values, [testId]: '' } }))); }
+    else { setSelectedTests([...selectedTests, testId]); setAthleteRows(athleteRows.map(row => ({ ...row, values: { ...row.values, [testId]: initValForTest(testId) } }))); }
   };
   const switchMode = (mode) => { setEntryMode(mode); setSelectedTests([]); setAthleteRows([]); };
-  const addAthleteRow = (athleteId) => { if (!athleteId || athleteRows.find(r => r.athleteId === athleteId)) return; const values = {}; selectedTests.forEach(tid => { values[tid] = ''; }); setAthleteRows([...athleteRows, { athleteId, values }]); };
+  const addAthleteRow = (athleteId) => { if (!athleteId || athleteRows.find(r => r.athleteId === athleteId)) return; const values = {}; selectedTests.forEach(tid => { values[tid] = initValForTest(tid); }); setAthleteRows([...athleteRows, { athleteId, values }]); };
   const removeAthleteRow = (index) => setAthleteRows(athleteRows.filter((_, i) => i !== index));
   const updateValue = (rowIndex, testId, value) => { const nr = [...athleteRows]; nr[rowIndex] = { ...nr[rowIndex], values: { ...nr[rowIndex].values, [testId]: value } }; setAthleteRows(nr); };
+  const updateRepValue = (rowIndex, testId, repIdx, value) => {
+    const nr = [...athleteRows];
+    const cur = Array.isArray(nr[rowIndex].values[testId]) ? [...nr[rowIndex].values[testId]] : [];
+    cur[repIdx] = value;
+    nr[rowIndex] = { ...nr[rowIndex], values: { ...nr[rowIndex].values, [testId]: cur } };
+    setAthleteRows(nr);
+  };
   const usedAthleteIds = athleteRows.map(r => r.athleteId);
   const startNextGroup = () => { setAthleteRows([]); setSubmittedResults([]); setShowSummary(false); };
 
   const handleSubmit = async () => {
     if (selectedTests.length === 0 || !testDate) { alert('Please select at least one test and a date'); return; }
     const toLog = [];
+    let multiRepIncomplete = false;
     athleteRows.forEach(row => {
       selectedTests.forEach(testId => {
-        const val = row.values[testId]; if (val === '' || val === undefined) return;
-        const testDef = getTestById(testId); let raw = parseFloat(val); let cv = raw;
+        const val = row.values[testId];
+        const testDef = getTestById(testId);
+        if (isMultiRepTest(testDef)) {
+          const expected = getMultiRepCount(testDef);
+          const arr = Array.isArray(val) ? val : [];
+          const filled = arr.filter(x => x !== '' && x !== undefined && x !== null && !isNaN(parseFloat(x)));
+          if (filled.length === 0) return;
+          if (filled.length !== expected) { multiRepIncomplete = true; return; }
+          const reps = arr.map(x => parseFloat(x));
+          const stats = computeRsaStats(reps);
+          if (!stats) return;
+          toLog.push({
+            athleteId: row.athleteId, testId, testDate,
+            rawValue: stats.avg, convertedValue: stats.avg,
+            unit: testDef.unit || 'sec',
+            reps, bestTime: stats.best, avgTime: stats.avg, dropOffPct: stats.drop,
+          });
+          return;
+        }
+        if (val === '' || val === undefined) return;
+        let raw = parseFloat(val); let cv = raw;
         if (testDef.allow_kg && useKg) { cv = Math.round(raw * 2.205); }
         if (testDef.convert_formula) cv = applyConversion(testDef, raw);
         toLog.push({ athleteId: row.athleteId, testId, testDate, rawValue: raw, convertedValue: cv, unit: testDef.allow_kg && useKg ? 'kg' : testDef.unit });
       });
     });
+    if (multiRepIncomplete) { alert('All 6 reps are required for the RSA Shuttle. Fill every box or leave them all empty.'); return; }
     if (toLog.length === 0) { alert('Please enter at least one value'); return; }
     setSubmitting(true);
     const logged = await logResults(toLog);
@@ -466,7 +530,7 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'flex', gap: 8, padding: '0 0 8px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 8, minWidth: 'fit-content' }}>
                 <div style={{ minWidth: 140, fontSize: 12, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1 }}>Name</div>
-                {selectedTests.map(tid => { const t = getTestById(tid); const headerUnit = t && t.allow_kg && useKg ? 'kg' : ''; return (<div key={tid} style={{ minWidth: (t && t.feet_inches) ? 130 : (t && t.row_time) ? 120 : 100, flex: 1, fontSize: 11, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t ? t.name : tid}{headerUnit && <span style={{ color: '#f0a500', display: 'block', fontSize: 10 }}>{headerUnit}</span>}</div>); })}
+                {selectedTests.map(tid => { const t = getTestById(tid); const headerUnit = t && t.allow_kg && useKg ? 'kg' : ''; const colW = isMultiRepTest(t) ? 360 : ((t && t.feet_inches) ? 130 : (t && t.row_time) ? 120 : 100); return (<div key={tid} style={{ minWidth: colW, flex: 1, fontSize: 11, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t ? t.name : tid}{headerUnit && <span style={{ color: '#f0a500', display: 'block', fontSize: 10 }}>{headerUnit}</span>}{isMultiRepTest(t) && <span style={{ display: 'block', fontSize: 9, color: '#888', letterSpacing: 0, textTransform: 'none', marginTop: 2 }}>{getMultiRepCount(t)} reps · all required</span>}</div>); })}
                 <div style={{ width: 32 }}></div>
               </div>
               {athleteRows.map((row, rowIndex) => {
@@ -476,11 +540,33 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
                     <div style={{ minWidth: 140 }}><div style={{ fontWeight: 600, fontSize: 14, color: '#e8e8e8' }}>{athlete ? athlete.first_name : ''}</div><div style={{ fontSize: 11, color: '#666' }}>{athlete ? athlete.last_name : ''}</div></div>
                     {selectedTests.map(tid => {
                       const t = getTestById(tid); const pr = getPR(row.athleteId, tid); const prR = getPRResult(row.athleteId, tid);
-                      const useFtIn = t && t.feet_inches; const isRowTest = t && t.row_time;
+                      const useFtIn = t && t.feet_inches; const isRowTest = t && t.row_time; const isMR = isMultiRepTest(t);
+                      const colW = isMR ? 360 : (useFtIn ? 130 : isRowTest ? 120 : 100);
                       const prDisplay = pr !== null ? (t && t.allow_kg && useKg ? Math.round(pr / 2.205) + ' kg' : (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr))) : null;
-                      return (<div key={tid} style={{ minWidth: useFtIn ? 130 : isRowTest ? 120 : 100, flex: 1 }}>
-                        {useFtIn ? <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isRowTest ? <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : <input type="number" step="0.01" placeholder={t && t.allow_kg && useKg ? 'kg' : (t ? t.unit : 'val')} value={row.values[tid] || ''} onChange={(e) => updateValue(rowIndex, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />}
-                        {prDisplay !== null && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>PR: {prDisplay}</div>}
+                      return (<div key={tid} style={{ minWidth: colW, flex: 1 }}>
+                        {isMR ? (() => {
+                          const repCount = getMultiRepCount(t);
+                          const arr = Array.isArray(row.values[tid]) ? row.values[tid] : Array(repCount).fill('');
+                          const numericReps = arr.map(x => parseFloat(x)).filter(v => !isNaN(v) && v > 0);
+                          const live = numericReps.length === repCount ? computeRsaStats(numericReps) : null;
+                          return (
+                            <div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + repCount + ', 1fr)', gap: 4 }}>
+                                {Array.from({ length: repCount }).map((_, idx) => (
+                                  <input key={idx} type="number" step="0.01" placeholder={'R' + (idx + 1)} value={arr[idx] || ''} onChange={(e) => updateRepValue(rowIndex, tid, idx, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '6px 2px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#fff', fontSize: 12, textAlign: 'center' }} />
+                                ))}
+                              </div>
+                              {live ? (
+                                <div style={{ marginTop: 4, fontSize: 10, color: '#888', textAlign: 'center' }}>
+                                  best <span style={{ color: '#fff', fontWeight: 700 }}>{live.best.toFixed(2)}s</span> · avg <span style={{ color: '#fff', fontWeight: 700 }}>{live.avg.toFixed(2)}s</span> · drop <span style={{ color: dropOffColor(live.drop), fontWeight: 700 }}>{live.drop.toFixed(1)}%</span>
+                                </div>
+                              ) : (
+                                <div style={{ marginTop: 4, fontSize: 10, color: '#555', textAlign: 'center' }}>seconds, e.g. 7.42</div>
+                              )}
+                            </div>
+                          );
+                        })() : useFtIn ? <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isRowTest ? <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : <input type="number" step="0.01" placeholder={t && t.allow_kg && useKg ? 'kg' : (t ? t.unit : 'val')} value={row.values[tid] || ''} onChange={(e) => updateValue(rowIndex, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />}
+                        {prDisplay !== null && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>{isMR ? 'PR avg' : 'PR'}: {prDisplay}</div>}
                       </div>);
                     })}
                     <button onClick={() => removeAthleteRow(rowIndex)} style={{ width: 32, padding: '4px', background: 'rgba(255,100,100,0.15)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 14 }}>×</button>
@@ -576,9 +662,58 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
         <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
           {[{ id: 'prs', label: 'Personal Records' }, { id: 'history', label: 'Test History' }, { id: 'progress', label: 'Progress Charts' }, ...(!isAdult ? [{ id: 'score', label: 'Athlete Score' }] : [])].map(tab => (<button key={tab.id} onClick={() => setProfileTab(tab.id)} style={{ padding: '10px 20px', background: profileTab === tab.id ? (tab.id === 'score' ? 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)') : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: profileTab === tab.id ? (tab.id === 'score' ? '#fff' : '#0a1628') : '#aaa', fontWeight: profileTab === tab.id ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{tab.label}</button>))}
         </div>
-        {profileTab === 'prs' && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>{Object.entries(testSet).map(([catLabel, tests]) => (<div key={catLabel}><h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{catLabel}</h4>{tests.map(t => { const pr = getPR(athlete.id, t.id); const prR = getPRResult(athlete.id, t.id); return (<div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}><span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr)) : '-'}</span></div>); })}</div>))}</div></div>)}
+        {profileTab === 'prs' && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>{Object.entries(testSet).map(([catLabel, tests]) => (<div key={catLabel}><h4 style={{ color: isAdult ? '#FFA500' : '#00d4ff', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{catLabel}</h4>{tests.map(t => {
+  const pr = getPR(athlete.id, t.id);
+  const prR = getPRResult(athlete.id, t.id);
+  if (isMultiRepTest(t)) {
+    const rsaResults = athleteResults.filter(r => r.test_id === t.id && Array.isArray(r.reps) && r.reps.length > 0);
+    let bestAttempt = null;
+    if (rsaResults.length > 0) {
+      bestAttempt = rsaResults.reduce((best, r) => {
+        const ra = r.avg_time !== null && r.avg_time !== undefined ? parseFloat(r.avg_time) : parseFloat(r.converted_value);
+        const ba = best ? (best.avg_time !== null && best.avg_time !== undefined ? parseFloat(best.avg_time) : parseFloat(best.converted_value)) : Infinity;
+        return ra < ba ? r : best;
+      }, null);
+    }
+    return (
+      <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: '#aaa' }}>{t.name}</span>
+          <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) + ' avg' : '-'}</span>
+        </div>
+        {bestAttempt && (() => {
+          const reps = (bestAttempt.reps || []).map(x => parseFloat(x));
+          const best = bestAttempt.best_time !== null && bestAttempt.best_time !== undefined ? parseFloat(bestAttempt.best_time) : Math.min(...reps);
+          const avg = bestAttempt.avg_time !== null && bestAttempt.avg_time !== undefined ? parseFloat(bestAttempt.avg_time) : reps.reduce((s, v) => s + v, 0) / reps.length;
+          const drop = bestAttempt.drop_off_pct !== null && bestAttempt.drop_off_pct !== undefined ? parseFloat(bestAttempt.drop_off_pct) : ((avg - best) / best) * 100;
+          return (
+            <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: 6, fontSize: 11 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, color: '#888' }}>
+                <span>best <span style={{ color: '#fff', fontWeight: 700 }}>{best.toFixed(2)}s</span></span>
+                <span>avg <span style={{ color: '#fff', fontWeight: 700 }}>{avg.toFixed(2)}s</span></span>
+                <span>drop <span style={{ color: dropOffColor(drop), fontWeight: 700 }}>{drop.toFixed(1)}%</span></span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${reps.length}, 1fr)`, gap: 3 }}>
+                {reps.map((rv, idx) => {
+                  const isBest = rv === best;
+                  return (
+                    <div key={idx} style={{ textAlign: 'center', padding: '4px 2px', background: isBest ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.04)', borderRadius: 4, color: isBest ? '#00ff88' : '#ddd', fontWeight: isBest ? 700 : 500 }}>
+                      <div style={{ fontSize: 9, color: '#666', marginBottom: 1 }}>R{idx + 1}</div>
+                      {rv.toFixed(2)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    );
+  }
+  return (<div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}><span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr)) : '-'}</span></div>);
+})}</div>))}</div></div>)}
         {profileTab === 'history' && (<div><div style={{ marginBottom: 16 }}><select value={historyFilter} onChange={(e) => setHistoryFilter(e.target.value)} style={{ ...iStyle, width: 260 }}><option value="">All Tests</option>{Object.entries(testSet).map(([catLabel, tests]) => (<optgroup key={catLabel} label={catLabel}>{tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>))}</select></div>
-          {sortedHistory.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{sortedHistory.map(r => { const t = getTestById(r.test_id); const isEd = editingResult === r.id; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 12, flexWrap: 'wrap' }}>{isEd ? (<><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} /><span style={{ color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</span><input type="number" step="0.01" value={editValue} onChange={(e) => setEditValue(e.target.value)} onWheel={preventScrollChange} style={{ width: 100, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} />{t && t.feet_inches && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatFeetInches(parseFloat(editValue))}</span>}{t && t.row_time && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatRowTime(parseFloat(editValue))}</span>}<button onClick={() => handleSaveResult(r)} style={{ padding: '6px 12px', background: 'rgba(0,255,136,0.3)', border: 'none', borderRadius: 4, color: '#00ff88', cursor: 'pointer', fontSize: 12 }}>Save</button><button onClick={() => setEditingResult(null)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button></>) : (<><div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div><div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</div><div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}{r.is_pr && ' 🏆'}</div><button onClick={() => handleEditResult(r)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button><button onClick={() => { if (window.confirm('Delete this result?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Delete</button></>)}</div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results found.</div>)}</div>)}
+          {sortedHistory.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{sortedHistory.map(r => { const t = getTestById(r.test_id); const isEd = editingResult === r.id; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 12, flexWrap: 'wrap' }}>{isEd ? (<><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} /><span style={{ color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</span><input type="number" step="0.01" value={editValue} onChange={(e) => setEditValue(e.target.value)} onWheel={preventScrollChange} style={{ width: 100, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 6, color: '#fff', fontSize: 14 }} />{t && t.feet_inches && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatFeetInches(parseFloat(editValue))}</span>}{t && t.row_time && editValue && <span style={{ color: '#888', fontSize: 12 }}>= {formatRowTime(parseFloat(editValue))}</span>}<button onClick={() => handleSaveResult(r)} style={{ padding: '6px 12px', background: 'rgba(0,255,136,0.3)', border: 'none', borderRadius: 4, color: '#00ff88', cursor: 'pointer', fontSize: 12 }}>Save</button><button onClick={() => setEditingResult(null)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Cancel</button></>) : (<><div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.test_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div><div style={{ flex: 1, color: '#00d4ff', fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_id}</div><div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}{isMultiRepTest(t) ? ' avg' : ''}{r.is_pr && ' 🏆'}</div>{isMultiRepTest(t) ? <span style={{ padding: '6px 12px', color: '#666', fontSize: 11 }}>edit n/a</span> : <button onClick={() => handleEditResult(r)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button>}<button onClick={() => { if (window.confirm('Delete this result?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Delete</button></>)}</div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No results found.</div>)}</div>)}
         {profileTab === 'progress' && (<div><div style={{ marginBottom: 20 }}><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Select Test</label><select value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)} style={{ ...iStyle, width: 280 }}><option value="">Choose a test...</option>{Object.entries(testSet).map(([catLabel, tests]) => (<optgroup key={catLabel} label={catLabel}>{tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>))}</select></div>{chartData.length > 0 && testDef ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}><h3 style={{ margin: 0, fontSize: 20 }}>{testDef.name} Progress</h3>{getPR(selectedAthlete, selectedTest) !== null && (() => { const prVal = getPR(selectedAthlete, selectedTest); const prR = getPRResult(selectedAthlete, selectedTest); return (<div style={{ padding: '8px 16px', background: 'rgba(0,255,136,0.2)', borderRadius: 8, color: '#00ff88', fontWeight: 700 }}>PR: {prR && testDef.convert_formula ? formatWithRaw(testDef, prVal, prR.raw_value) : formatResultWithUnit(testDef, prVal)}</div>); })()}</div><SimpleChart data={chartData} direction={testDef.direction} testDef={testDef} onPointClick={() => { setProfileTab('history'); setHistoryFilter(selectedTest); }} /><div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>Click chart to view/edit individual results</div></div>) : selectedTest ? (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No data yet for {testDef?.name}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>Select a test above to view progress</div>)}</div>)}
         {profileTab === 'score' && !isAdult && (<div style={{ background: 'rgba(168,85,247,0.06)', borderRadius: 12, padding: 24, border: '1px solid rgba(168,85,247,0.25)' }}>{athleteScore ? (<><div style={{ display: 'flex', alignItems: 'center', gap: 32, marginBottom: 28, flexWrap: 'wrap' }}><div style={{ textAlign: 'center' }}><div style={{ fontSize: 80, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: scoreLabel(athleteScore.score).color, lineHeight: 1 }}>{athleteScore.score}</div><div style={{ fontSize: 13, color: scoreLabel(athleteScore.score).color, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>{scoreLabel(athleteScore.score).label}</div></div><div style={{ flex: 1, minWidth: 200 }}><div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{athleteScore.testsUsed} of {athleteScore.totalTests} tests scored · compared against {athletes.filter(a => (a.type || 'athlete') === 'athlete').length} youth athletes</div><div style={{ fontSize: 12, color: '#666', lineHeight: 1.6 }}>Score = percentile rank · 50 = gym average · 90+ = elite</div></div></div><div style={{ marginBottom: 28 }}><div style={{ height: 12, background: 'rgba(255,255,255,0.08)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}><div style={{ height: '100%', width: `${athleteScore.score}%`, background: `linear-gradient(90deg, #7c3aed, ${scoreLabel(athleteScore.score).color})`, borderRadius: 6 }} /></div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555', marginTop: 4 }}><span>1st %ile</span><span>25th</span><span>50th avg</span><span>75th</span><span>99th</span></div></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>{athleteScore.breakdown.map(item => { const sl = scoreLabel(item.tScore); const displayVal = item.testId === 'max_velocity' ? item.best.toFixed(1) + ' MPH' : item.unit ? item.best.toFixed(item.unit === 'sec' ? 2 : (item.unit === 'in' ? 1 : 0)) + ' ' + item.unit : item.best.toFixed(2); return (<div key={item.testId} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: '12px 14px', border: `1px solid ${sl.color}30` }}><div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{item.label}</div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><span style={{ fontSize: 22, fontWeight: 800, color: sl.color }}>{item.tScore}</span><span style={{ fontSize: 12, color: '#666' }}>{displayVal}</span></div><div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}><div style={{ height: '100%', width: `${item.tScore}%`, background: sl.color, borderRadius: 2 }} /></div></div>); })}{TSA_TEST_IDS.filter(t => !athleteScore.breakdown.find(b => b.testId === t.id)).map(t => (<div key={t.id} style={{ background: 'rgba(0,0,0,0.1)', borderRadius: 8, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.05)', opacity: 0.5 }}><div style={{ fontSize: 11, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{t.label}</div><div style={{ fontSize: 13, color: '#444' }}>No data</div></div>))}</div></>) : (<div style={{ textAlign: 'center', padding: 32, color: '#666' }}><p style={{ fontSize: 16, marginBottom: 8 }}>Not enough data to calculate an Athlete Score.</p><p style={{ fontSize: 13 }}>Needs at least one result in 1 of the 7 scored tests.</p></div>)}</div>)}
       </div>)}
