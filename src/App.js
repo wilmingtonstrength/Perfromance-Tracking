@@ -87,43 +87,6 @@ const applyConversion = (testDef, rawValue) => {
   } catch { return rawValue; }
 };
 
-/* ===================== RSA / MULTI-REP HELPERS ===================== */
-const isMultiRepTest = (testDef) => {
-  if (!testDef) return false;
-  const cf = testDef.conversion_formula;
-  if (cf && cf.type === 'multi_rep' && cf.reps) return true;
-  if ((testDef.name || '').toLowerCase().includes('rsa shuttle')) return true;
-  return false;
-};
-
-const getMultiRepCount = (testDef) => {
-  if (!testDef) return 0;
-  const cf = testDef.conversion_formula;
-  if (cf && cf.type === 'multi_rep' && cf.reps) return parseInt(cf.reps);
-  if ((testDef.name || '').toLowerCase().includes('rsa shuttle')) return 6;
-  return 0;
-};
-
-const computeRsaStats = (reps) => {
-  const nums = reps.map(r => parseFloat(r)).filter(v => !isNaN(v) && v > 0);
-  if (nums.length === 0) return null;
-  const best = Math.min(...nums);
-  const avg = nums.reduce((s, v) => s + v, 0) / nums.length;
-  const drop = best > 0 ? ((avg - best) / best) * 100 : 0;
-  return {
-    best: parseFloat(best.toFixed(3)),
-    avg: parseFloat(avg.toFixed(3)),
-    drop: parseFloat(drop.toFixed(2)),
-  };
-};
-
-const dropOffColor = (pct) => {
-  if (pct === null || pct === undefined || isNaN(pct)) return '#888';
-  if (pct < 5) return '#00ff88';
-  if (pct < 10) return '#FFA500';
-  return '#ff6666';
-};
-
 const getFlyMPH = (testDef, timeInSeconds) => {
   if (!testDef || !timeInSeconds) return null;
   const t = parseFloat(timeInSeconds);
@@ -776,17 +739,10 @@ export default function App() {
         const best = testDef.direction === 'higher' ? Math.max(...prev.map(r => parseFloat(r.value))) : Math.min(...prev.map(r => parseFloat(r.value)));
         isPR = testDef.direction === 'higher' ? result.value > best : result.value < best;
       }
-      const insertRow = {
+      const { data } = await supabase.from('test_results').insert([{
         gym_id: gymId, athlete_id: result.athleteId, custom_test_id: result.testId,
         test_type: testDef?.name || '', value: result.value, tested_at: result.testDate, is_pr: isPR
-      };
-      if (Array.isArray(result.reps) && result.reps.length > 0) {
-        insertRow.reps = result.reps;
-        insertRow.best_time = result.bestTime;
-        insertRow.avg_time = result.avgTime;
-        insertRow.drop_off_pct = result.dropOffPct;
-      }
-      const { data } = await supabase.from('test_results').insert([insertRow]).select();
+      }]).select();
       if (data) { newResults.push(data[0]); if (isPR) prCount++; }
     }
     setResults([...results, ...newResults]);
@@ -890,58 +846,28 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
 
   const testSet = getTestsByCategory();
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.unit === 'weight'; });
-  const initValForTest = (tid) => {
-    const t = getTestById(tid);
-    if (isMultiRepTest(t)) return Array(getMultiRepCount(t)).fill('');
-    return '';
-  };
   const toggleTest = (id) => {
     if (selectedTests.includes(id)) { setSelectedTests(selectedTests.filter(t => t !== id)); setAthleteRows(athleteRows.map(r => { const nv = { ...r.values }; delete nv[id]; return { ...r, values: nv }; })); }
-    else { setSelectedTests([...selectedTests, id]); setAthleteRows(athleteRows.map(r => ({ ...r, values: { ...r.values, [id]: initValForTest(id) } }))); }
+    else { setSelectedTests([...selectedTests, id]); setAthleteRows(athleteRows.map(r => ({ ...r, values: { ...r.values, [id]: '' } }))); }
   };
-  const addAthleteRow = (id) => { if (!id || athleteRows.find(r => r.athleteId === id)) return; const v = {}; selectedTests.forEach(t => { v[t] = initValForTest(t); }); setAthleteRows([...athleteRows, { athleteId: id, values: v }]); };
+  const addAthleteRow = (id) => { if (!id || athleteRows.find(r => r.athleteId === id)) return; const v = {}; selectedTests.forEach(t => { v[t] = ''; }); setAthleteRows([...athleteRows, { athleteId: id, values: v }]); };
   const removeRow = (i) => setAthleteRows(athleteRows.filter((_, idx) => idx !== i));
   const updateValue = (ri, tid, val) => { const nr = [...athleteRows]; nr[ri] = { ...nr[ri], values: { ...nr[ri].values, [tid]: val } }; setAthleteRows(nr); };
-  const updateRepValue = (ri, tid, repIdx, val) => {
-    const nr = [...athleteRows];
-    const cur = Array.isArray(nr[ri].values[tid]) ? [...nr[ri].values[tid]] : [];
-    cur[repIdx] = val;
-    nr[ri] = { ...nr[ri], values: { ...nr[ri].values, [tid]: cur } };
-    setAthleteRows(nr);
-  };
 
   const handleSubmit = async () => {
     if (selectedTests.length === 0) { alert('Select at least one test'); return; }
     const toLog = [];
-    let multiRepIncomplete = false;
     athleteRows.forEach(row => {
       selectedTests.forEach(tid => {
         const val = row.values[tid];
-        const testDef = getTestById(tid);
-        if (isMultiRepTest(testDef)) {
-          const expected = getMultiRepCount(testDef);
-          const arr = Array.isArray(val) ? val : [];
-          const filled = arr.filter(x => x !== '' && x !== undefined && x !== null && !isNaN(parseFloat(x)));
-          if (filled.length === 0) return; // skipped row, ok
-          if (filled.length !== expected) { multiRepIncomplete = true; return; }
-          const reps = arr.map(x => parseFloat(x));
-          const stats = computeRsaStats(reps);
-          if (!stats) return;
-          toLog.push({
-            athleteId: row.athleteId, testId: tid, testDate,
-            value: stats.avg,
-            reps, bestTime: stats.best, avgTime: stats.avg, dropOffPct: stats.drop,
-          });
-          return;
-        }
         if (val === '' || val === undefined) return;
+        const testDef = getTestById(tid);
         let v = parseFloat(val);
         if (testDef && testDef.unit === 'weight' && useKg) v = Math.round(v * 2.205);
         if (testDef && testDef.conversion_formula) v = applyConversion(testDef, parseFloat(val));
         toLog.push({ athleteId: row.athleteId, testId: tid, testDate, value: v });
       });
     });
-    if (multiRepIncomplete) { alert('All 6 reps are required for the RSA Shuttle. Fill every box or leave them all empty.'); return; }
     if (toLog.length === 0) { alert('Enter at least one value'); return; }
     setSubmitting(true);
     const logged = await logResults(toLog);
@@ -1008,7 +934,7 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'flex', gap: 8, padding: '0 0 8px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 8, minWidth: 'fit-content' }}>
                 <div style={{ minWidth: 140, fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Name</div>
-                {selectedTests.map(tid => { const t = getTestById(tid); const colW = isMultiRepTest(t) ? 360 : ((t && t.unit === 'distance') ? 130 : 100); return <div key={tid} style={{ minWidth: colW, flex: 1, fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t?.name || tid}{isMultiRepTest(t) && <span style={{ display: 'block', fontSize: 9, color: '#888', letterSpacing: 0, textTransform: 'none', marginTop: 2 }}>6 reps · all required</span>}</div>; })}
+                {selectedTests.map(tid => { const t = getTestById(tid); return <div key={tid} style={{ minWidth: (t && t.unit === 'distance') ? 130 : 100, flex: 1, fontSize: 11, color: accentColor, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t?.name || tid}</div>; })}
                 <div style={{ width: 32 }}></div>
               </div>
               {athleteRows.map((row, ri) => {
@@ -1019,37 +945,14 @@ function KMTestEntryPage({ athletes, logResults, getPR, getTestById, customTests
                     {selectedTests.map(tid => {
                       const t = getTestById(tid);
                       const pr = getPR(row.athleteId, tid);
-                      const colW = isMultiRepTest(t) ? 360 : ((t && t.unit === 'distance') ? 130 : 100);
                       return (
-                        <div key={tid} style={{ minWidth: colW, flex: 1 }}>
-                          {isMultiRepTest(t) ? (() => {
-                            const repCount = getMultiRepCount(t);
-                            const arr = Array.isArray(row.values[tid]) ? row.values[tid] : Array(repCount).fill('');
-                            const numericReps = arr.map(x => parseFloat(x)).filter(v => !isNaN(v) && v > 0);
-                            const live = numericReps.length === repCount ? computeRsaStats(numericReps) : null;
-                            return (
-                              <div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + repCount + ', 1fr)', gap: 4 }}>
-                                  {Array.from({ length: repCount }).map((_, idx) => (
-                                    <input key={idx} type="number" step="0.01" placeholder={'R' + (idx + 1)} value={arr[idx] || ''} onChange={(e) => updateRepValue(ri, tid, idx, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '6px 2px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, color: '#fff', fontSize: 12, textAlign: 'center' }} />
-                                  ))}
-                                </div>
-                                {live ? (
-                                  <div style={{ marginTop: 4, fontSize: 10, color: '#888', textAlign: 'center' }}>
-                                    best <span style={{ color: '#fff', fontWeight: 700 }}>{live.best.toFixed(2)}s</span> · avg <span style={{ color: '#fff', fontWeight: 700 }}>{live.avg.toFixed(2)}s</span> · drop <span style={{ color: dropOffColor(live.drop), fontWeight: 700 }}>{live.drop.toFixed(1)}%</span>
-                                  </div>
-                                ) : (
-                                  <div style={{ marginTop: 4, fontSize: 10, color: '#555', textAlign: 'center' }}>seconds, e.g. 7.42</div>
-                                )}
-                              </div>
-                            );
-                          })() : t && t.unit === 'distance' ? (
+                        <div key={tid} style={{ minWidth: (t && t.unit === 'distance') ? 130 : 100, flex: 1 }}>
+                          {t && t.unit === 'distance' ? (
                             <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(ri, tid, val)} />
                           ) : (
                             <input type="number" step="0.01" placeholder={t?.display_unit || t?.unit || 'val'} value={row.values[tid] || ''} onChange={(e) => updateValue(ri, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />
                           )}
-                          {pr !== null && !isMultiRepTest(t) && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>PR: {formatResultWithUnit(t, pr)}</div>}
-                          {pr !== null && isMultiRepTest(t) && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>PR avg: {formatResultWithUnit(t, pr)}</div>}
+                          {pr !== null && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>PR: {formatResultWithUnit(t, pr)}</div>}
                         </div>
                       );
                     })}
@@ -1428,59 +1331,11 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
               {Object.entries(testSet).map(([cat, tests]) => (
                 <div key={cat}>
                   <h4 style={{ color: accentColor, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{cat}</h4>
-                  {tests.map(t => {
-                    const pr = getPR(athlete.id, t.id);
-                    if (isMultiRepTest(t)) {
-                      const rsaResults = athleteResults.filter(r => r.custom_test_id === t.id && Array.isArray(r.reps) && r.reps.length > 0);
-                      let bestAttempt = null;
-                      if (rsaResults.length > 0) {
-                        bestAttempt = rsaResults.reduce((best, r) => {
-                          const ra = r.avg_time !== null && r.avg_time !== undefined ? parseFloat(r.avg_time) : parseFloat(r.value);
-                          const ba = best ? (best.avg_time !== null && best.avg_time !== undefined ? parseFloat(best.avg_time) : parseFloat(best.value)) : Infinity;
-                          return ra < ba ? r : best;
-                        }, null);
-                      }
-                      return (
-                        <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: '#aaa' }}>{t.name}</span>
-                            <span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) + ' avg' : '-'}</span>
-                          </div>
-                          {bestAttempt && (() => {
-                            const reps = (bestAttempt.reps || []).map(x => parseFloat(x));
-                            const best = bestAttempt.best_time !== null && bestAttempt.best_time !== undefined ? parseFloat(bestAttempt.best_time) : Math.min(...reps);
-                            const avg = bestAttempt.avg_time !== null && bestAttempt.avg_time !== undefined ? parseFloat(bestAttempt.avg_time) : reps.reduce((s, v) => s + v, 0) / reps.length;
-                            const drop = bestAttempt.drop_off_pct !== null && bestAttempt.drop_off_pct !== undefined ? parseFloat(bestAttempt.drop_off_pct) : ((avg - best) / best) * 100;
-                            return (
-                              <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: 6, fontSize: 11 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, color: '#888' }}>
-                                  <span>best <span style={{ color: '#fff', fontWeight: 700 }}>{best.toFixed(2)}s</span></span>
-                                  <span>avg <span style={{ color: '#fff', fontWeight: 700 }}>{avg.toFixed(2)}s</span></span>
-                                  <span>drop <span style={{ color: dropOffColor(drop), fontWeight: 700 }}>{drop.toFixed(1)}%</span></span>
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${reps.length}, 1fr)`, gap: 3 }}>
-                                  {reps.map((rv, idx) => {
-                                    const isBest = rv === best;
-                                    return (
-                                      <div key={idx} style={{ textAlign: 'center', padding: '4px 2px', background: isBest ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.04)', borderRadius: 4, color: isBest ? '#00ff88' : '#ddd', fontWeight: isBest ? 700 : 500 }}>
-                                        <div style={{ fontSize: 9, color: '#666', marginBottom: 1 }}>R{idx + 1}</div>
-                                        {rv.toFixed(2)}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      );
-                    }
-                    return (
-                      <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
-                        <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}{pr !== null && getFlyMPH(t, pr) ? <span style={{ color: accentColor, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>{getFlyMPH(t, pr)} MPH</span> : ''}</span>
-                      </div>
-                    );
-                  })}
+                  {tests.map(t => { const pr = getPR(athlete.id, t.id); return (
+                    <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
+                      <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}{pr !== null && getFlyMPH(t, pr) ? <span style={{ color: accentColor, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>{getFlyMPH(t, pr)} MPH</span> : ''}</span>
+                    </div>
+                  ); })}
                 </div>
               ))}
             </div>
@@ -1510,12 +1365,8 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                           <>
                             <div style={{ width: 100, fontSize: 13, color: '#888' }}>{new Date(r.tested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                             <div style={{ flex: 1, color: accentColor, fontSize: 14, fontWeight: 600 }}>{t?.name || r.test_type}</div>
-                            <div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? formatResultWithUnit(t, r.value) : r.value}{isMultiRepTest(t) ? ' avg' : ''}{r.is_pr && ' 🏆'}</div>
-                            {isMultiRepTest(t) ? (
-                              <span style={{ padding: '6px 12px', color: '#666', fontSize: 11 }}>edit n/a</span>
-                            ) : (
-                              <button onClick={() => { setEditingResult(r.id); setEditDate(String(r.tested_at).slice(0, 10)); setEditValue(String(r.value)); }} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button>
-                            )}
+                            <div style={{ fontWeight: 700, color: r.is_pr ? '#ffd700' : '#00ff88' }}>{t ? formatResultWithUnit(t, r.value) : r.value}{r.is_pr && ' 🏆'}</div>
+                            <button onClick={() => { setEditingResult(r.id); setEditDate(String(r.tested_at).slice(0, 10)); setEditValue(String(r.value)); }} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Edit</button>
                             <button onClick={() => { if (window.confirm('Delete?')) deleteResult(r.id); }} style={{ padding: '6px 12px', background: 'rgba(255,100,100,0.2)', border: 'none', borderRadius: 4, color: '#ff6666', cursor: 'pointer', fontSize: 12 }}>Del</button>
                           </>
                         )}
