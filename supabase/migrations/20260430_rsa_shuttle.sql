@@ -28,7 +28,7 @@ VALUES (
   'rsa_shuttle', 'RSA Shuttle', 'athlete', 'agility', 'Change of Direction',
   'lower', 'sec', 'sec',
   true, 6,
-  true, 'speed', 'fixed2',
+  false, 'speed', 'fixed2',
   true, COALESCE((SELECT MAX(sort_order) + 1 FROM tests), 100)
 )
 ON CONFLICT (id) DO NOTHING;
