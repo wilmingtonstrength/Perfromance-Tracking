@@ -635,7 +635,7 @@ export default function App() {
     if (!gym) return 'active';
     const status = gym.subscription_status || 'trialing';
     if (status === 'active') return 'active';
-    if (status === 'trialing' || !gym.subscription_status) {
+    if (status === 'trial' || status === 'trialing' || !gym.subscription_status) {
       const trialStart = gym.trial_started_at || gym.created_at;
       if (!trialStart) return 'active';
       const trialEnd = new Date(trialStart);
