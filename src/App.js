@@ -395,15 +395,15 @@ function OnboardingPage({ user, onComplete }) {
     setSaving(true);
     const slug = gymName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-    const { data: gymData, error: gymErr } = await supabase.from('gyms').insert([{
-      name: gymName, slug, primary_color: primaryColor, logo_letter: gymName.charAt(0).toUpperCase()
-    }]).select();
+    const { data: gymData, error: gymErr } = await supabase.rpc('create_gym_with_owner', {
+      p_name: gymName,
+      p_slug: slug,
+      p_primary_color: primaryColor,
+      p_logo_letter: gymName.charAt(0).toUpperCase(),
+    });
 
     if (gymErr || !gymData) { alert('Error creating gym: ' + (gymErr?.message || 'Unknown')); setSaving(false); return; }
-    const gymId = gymData[0].id;
-
-    const { error: linkErr } = await supabase.from('gym_users').insert([{ user_id: user.id, gym_id: gymId, role: 'admin', email: user.email }]);
-    if (linkErr) { alert('Error linking account: ' + linkErr.message); setSaving(false); return; }
+    const gymId = gymData.id;
 
     const selectedTests = presets.filter(p => selectedPresets.includes(p.id));
     if (selectedTests.length > 0) {
