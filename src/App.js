@@ -6,9 +6,22 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 /* ===================== ANALYTICS ===================== */
+const META_PIXEL_EVENT_MAP = {
+  signup_started: { type: 'standard', name: 'Lead' },
+  signup_completed: { type: 'standard', name: 'CompleteRegistration' },
+  trial_activated: { type: 'standard', name: 'StartTrial' },
+  first_athlete_added: { type: 'custom', name: 'FirstAthleteAdded' },
+};
 const trackEvent = (eventName, params = {}) => {
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push({ event: eventName, ...params });
+  try {
+    const pixelMap = META_PIXEL_EVENT_MAP[eventName];
+    if (pixelMap && window.fbq) {
+      if (pixelMap.type === 'standard') window.fbq('track', pixelMap.name, params);
+      else window.fbq('trackCustom', pixelMap.name, params);
+    }
+  } catch (e) {}
   try { console.log('%c[Kaimetric Analytics] ' + eventName + ' fired', 'color:#00d4ff;font-weight:bold', params); } catch (e) {}
 };
 
