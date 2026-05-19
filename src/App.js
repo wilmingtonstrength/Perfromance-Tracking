@@ -5,12 +5,16 @@ const supabaseUrl = 'https://jfyexedcjgerahuumyqu.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmeWV4ZWRjamdlcmFodXVteXF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDc1NzUsImV4cCI6MjA4OTA4MzU3NX0.54fM4aVWV_myuu_alK_OevKTnaqekXABRGT3Qme_2Sc';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Update this to your live Kaimetric setup-call Calendly link.
+const SETUP_CALL_URL = 'https://calendly.com/kaimetric/setup-call';
+
 /* ===================== ANALYTICS ===================== */
 const META_PIXEL_EVENT_MAP = {
   signup_started: { type: 'standard', name: 'Lead' },
   signup_completed: { type: 'standard', name: 'CompleteRegistration' },
   trial_activated: { type: 'standard', name: 'StartTrial' },
   first_athlete_added: { type: 'custom', name: 'FirstAthleteAdded' },
+  setup_call_clicked: { type: 'custom', name: 'SetupCallClicked' },
 };
 const trackEvent = (eventName, params = {}) => {
   window.dataLayer = window.dataLayer || [];
@@ -390,6 +394,7 @@ function LoginPage({ onLogin }) {
 function OnboardingPage({ user, onComplete }) {
   const [step, setStep] = useState(1);
   const [gymName, setGymName] = useState('');
+  const [phone, setPhone] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#00d4ff');
   const [presets, setPresets] = useState([]);
   const [selectedPresets, setSelectedPresets] = useState([]);
@@ -413,6 +418,7 @@ function OnboardingPage({ user, onComplete }) {
       p_slug: slug,
       p_primary_color: primaryColor,
       p_logo_letter: gymName.charAt(0).toUpperCase(),
+      p_phone: phone.trim() || null,
     });
 
     if (gymErr || !gymData) { alert('Error creating gym: ' + (gymErr?.message || 'Unknown')); setSaving(false); return; }
@@ -495,6 +501,11 @@ function OnboardingPage({ user, onComplete }) {
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Program / Gym Name</label>
               <input type="text" value={gymName} onChange={(e) => setGymName(e.target.value)} placeholder="e.g. North Brunswick Football" style={iStyle} />
               <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>Use your school, gym, or program name. You can change this later in Settings.</div>
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Phone Number <span style={{ color: '#666', fontWeight: 400 }}>(optional)</span></label>
+              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 555-5555" style={iStyle} />
+              <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>If you ever need help getting set up, Matt (the founder) will text you directly. We never share your number.</div>
             </div>
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Brand Color</label>
@@ -793,6 +804,35 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a1628 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: "'Archivo', 'Helvetica Neue', sans-serif", color: '#e8e8e8' }}>
       <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&display=swap" rel="stylesheet" />
+      {isTrialing && !isAdminUser && !gym?.setup_call_dismissed_at && !gym?.setup_call_clicked_at && (
+        <div style={{ background: 'rgba(0,212,255,0.1)', borderBottom: '1px solid rgba(0,212,255,0.2)', padding: '12px 24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 14 }}>
+          <span style={{ color: '#e8e8e8' }}>Want a hand getting set up? Book a free 15 min call with Matt (the founder) and he will walk you through everything.</span>
+          <a
+            href={SETUP_CALL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={async () => {
+              trackEvent('setup_call_clicked', { gym_id: gymId });
+              const ts = new Date().toISOString();
+              try {
+                await supabase.from('gyms').update({ setup_call_clicked_at: ts }).eq('id', gymId);
+                setGym(prev => prev ? { ...prev, setup_call_clicked_at: ts } : prev);
+              } catch (e) {}
+            }}
+            style={{ padding: '8px 18px', background: 'linear-gradient(135deg, #00d4ff 0%, #00b8e6 100%)', borderRadius: 6, color: '#0a1628', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}
+          >Book my free call</a>
+          <button
+            onClick={async () => {
+              const ts = new Date().toISOString();
+              try {
+                await supabase.from('gyms').update({ setup_call_dismissed_at: ts }).eq('id', gymId);
+                setGym(prev => prev ? { ...prev, setup_call_dismissed_at: ts } : prev);
+              } catch (e) {}
+            }}
+            style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}
+          >No thanks</button>
+        </div>
+      )}
       {isTrialing && !isAdminUser && trialDaysLeft <= 7 && (
         <div style={{ background: trialDaysLeft <= 3 ? 'rgba(255,100,100,0.15)' : 'rgba(255,165,0,0.1)', padding: '10px 24px', textAlign: 'center', fontSize: 14, color: trialDaysLeft <= 3 ? '#ff6666' : '#FFA500', fontWeight: 600 }}>
           {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial. <a href={'https://buy.stripe.com/9B6dR8gKPbBK1Ny9io8EM00i?client_reference_id=' + gymId} style={{ color: '#00d4ff', textDecoration: 'underline', marginLeft: 8 }}>Subscribe now</a> to keep your data.
@@ -2216,6 +2256,11 @@ function KMAdminPage({ accentColor }) {
     return owner?.email || '—';
   };
 
+  const getOwnerPhone = (gymId) => {
+    const owner = gymUsers.find(gu => gu.gym_id === gymId && gu.role === 'admin');
+    return owner?.phone || '';
+  };
+
   const getAthleteCount = (gymId) => allAthletes.filter(a => a.gym_id === gymId).length;
   const getResultCount = (gymId) => allResults.filter(r => r.gym_id === gymId).length;
   const getTestCount = (gymId) => allTests.filter(t => t.gym_id === gymId && t.active).length;
@@ -2359,7 +2404,12 @@ function KMAdminPage({ accentColor }) {
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{g.name}</div>
                 <div style={{ fontSize: 11, color: '#555', marginTop: 1 }}>{g.slug}</div>
               </div>
-              <div style={{ fontSize: 13, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getOwnerEmail(g.id)}</div>
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontSize: 13, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getOwnerEmail(g.id)}</div>
+                {getOwnerPhone(g.id) && <a href={'tel:' + getOwnerPhone(g.id)} style={{ fontSize: 11, color: '#00d4ff', textDecoration: 'none' }}>{getOwnerPhone(g.id)}</a>}
+                {g.setup_call_clicked_at && <div style={{ fontSize: 10, color: '#00ff88', marginTop: 1 }}>Booked call</div>}
+                {!g.setup_call_clicked_at && g.setup_call_dismissed_at && <div style={{ fontSize: 10, color: '#666', marginTop: 1 }}>Call dismissed</div>}
+              </div>
               <div>{statusBadge(g)}</div>
               <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: ath > 0 ? '#00ff88' : '#444' }}>{ath}</div>
               <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: res > 0 ? accentColor : '#444' }}>{res}</div>
