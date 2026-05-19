@@ -806,7 +806,7 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&display=swap" rel="stylesheet" />
       {isTrialing && !isAdminUser && !gym?.setup_call_dismissed_at && !gym?.setup_call_clicked_at && (
         <div style={{ background: 'rgba(0,212,255,0.1)', borderBottom: '1px solid rgba(0,212,255,0.2)', padding: '12px 24px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 14 }}>
-          <span style={{ color: '#e8e8e8' }}>Want a hand getting set up? Book a free 15 min call with Matt (the founder) and he will walk you through everything.</span>
+          <span style={{ color: '#e8e8e8' }}>Want a hand getting set up? Book a free 30 min call with Matt (the founder) and he will walk you through everything.</span>
           <a
             href={SETUP_CALL_URL}
             target="_blank"
