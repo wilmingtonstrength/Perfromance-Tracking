@@ -6,7 +6,7 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Update this to your live Kaimetric setup-call Calendly link.
-const SETUP_CALL_URL = 'https://calendly.com/kaimetric/setup-call';
+const SETUP_CALL_URL = 'https://calendly.com/matt-kaimetric/30min';
 
 /* ===================== ANALYTICS ===================== */
 const META_PIXEL_EVENT_MAP = {
