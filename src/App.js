@@ -704,7 +704,8 @@ export default function App() {
   const addAthlete = async (athlete) => {
     const { data, error } = await supabase.from('athletes').insert([{
       gym_id: gymId, first_name: athlete.firstName, last_name: athlete.lastName,
-      date_of_birth: athlete.birthday || null, gender: athlete.gender, sport: athlete.sport || null
+      date_of_birth: athlete.birthday || null, gender: athlete.gender, sport: athlete.sport || null,
+      team_level: athlete.teamLevel || null
     }]).select();
     if (data) { const newList = [...athletes, data[0]].sort((a, b) => a.first_name.localeCompare(b.first_name)); setAthletes(newList); showNotification(athlete.firstName + ' added!'); if (athletes.length === 0) trackEvent('first_athlete_added'); }
     if (error) showNotification('Error: ' + error.message, 'error');
@@ -714,10 +715,11 @@ export default function App() {
     const { error } = await supabase.from('athletes').update({
       first_name: updates.firstName, last_name: updates.lastName,
       date_of_birth: updates.birthday || null, gender: updates.gender,
-      sport: updates.sport, active: updates.active !== false
+      sport: updates.sport, team_level: updates.teamLevel || null,
+      active: updates.active !== false
     }).eq('id', id);
     if (!error) {
-      setAthletes(athletes.map(a => a.id === id ? { ...a, first_name: updates.firstName, last_name: updates.lastName, date_of_birth: updates.birthday, gender: updates.gender, sport: updates.sport, active: updates.active !== false } : a));
+      setAthletes(athletes.map(a => a.id === id ? { ...a, first_name: updates.firstName, last_name: updates.lastName, date_of_birth: updates.birthday, gender: updates.gender, sport: updates.sport, team_level: updates.teamLevel || null, active: updates.active !== false } : a));
       showNotification('Updated!');
     }
   };
@@ -995,6 +997,8 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
   const [firstName, setFirstName] = useState(''); const [lastName, setLastName] = useState('');
   const [birthday, setBirthday] = useState(''); const [gender, setGender] = useState('Male');
   const [sport, setSport] = useState('');
+  const [teamLevel, setTeamLevel] = useState('');
+  const boardMode = gym?.record_board_mode === 'team' ? 'team' : 'youth';
   const [profileTab, setProfileTab] = useState('prs');
   const [selectedTest, setSelectedTest] = useState('');
   const [historyFilter, setHistoryFilter] = useState('');
@@ -1015,12 +1019,17 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
   };
 
   const generateTemplate = () => {
-    const headers = ['first_name', 'last_name', 'gender', 'birthday', 'sport'];
+    const headers = boardMode === 'team'
+      ? ['first_name', 'last_name', 'gender', 'birthday', 'sport', 'team_level']
+      : ['first_name', 'last_name', 'gender', 'birthday', 'sport'];
     importTests.forEach(tid => {
       const t = getTestById(tid);
       if (t) headers.push(t.name);
     });
-    const csv = headers.join(',') + '\n' + headers.map((h, i) => i === 0 ? 'John' : i === 1 ? 'Smith' : i === 2 ? 'Male' : i === 3 ? '2008-05-15' : i === 4 ? 'Football' : '').join(',') + '\n';
+    const sample = boardMode === 'team'
+      ? { first_name: 'John', last_name: 'Smith', gender: 'Male', birthday: '2008-05-15', sport: 'Football', team_level: 'varsity' }
+      : { first_name: 'John', last_name: 'Smith', gender: 'Male', birthday: '2008-05-15', sport: 'Football' };
+    const csv = headers.join(',') + '\n' + headers.map(h => sample[h] !== undefined ? sample[h] : '').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'athlete_import_template.csv'; a.click();
@@ -1070,9 +1079,12 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
     for (const row of importData) {
       if (!row.first_name && !row.last_name) continue;
       // Insert athlete
+      const rawLevel = (row.team_level || '').toLowerCase().trim();
+      const normLevel = rawLevel === 'varsity' || rawLevel === 'v' ? 'varsity' : (rawLevel === 'jv' || rawLevel === 'junior varsity' ? 'jv' : null);
       const { data: ath, error: athErr } = await supabase.from('athletes').insert([{
         gym_id: gymId, first_name: row.first_name || '', last_name: row.last_name || '',
-        date_of_birth: row.birthday || null, gender: row.gender || null, sport: row.sport || null
+        date_of_birth: row.birthday || null, gender: row.gender || null, sport: row.sport || null,
+        team_level: normLevel
       }]).select();
       if (athErr || !ath) continue;
       newAthletes.push(ath[0]);
@@ -1112,9 +1124,9 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
   const athleteScore = selectedAthlete ? calculateAthleteScore(selectedAthlete, athletes, results, customTests) : null;
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
-  const handleAdd = (e) => { e.preventDefault(); if (!firstName || !lastName) return; addAthlete({ firstName, lastName, birthday, gender, sport }); setFirstName(''); setLastName(''); setBirthday(''); setGender('Male'); setSport(''); setShowAdd(false); };
-  const startEdit = () => { if (!athlete) return; setFirstName(athlete.first_name); setLastName(athlete.last_name); setBirthday(athlete.date_of_birth ? String(athlete.date_of_birth).slice(0, 10) : ''); setGender(athlete.gender || 'Male'); setSport(athlete.sport || ''); setEditingInfo(true); };
-  const saveEdit = () => { updateAthlete(selectedAthlete, { firstName, lastName, birthday, gender, sport, active: true }); setEditingInfo(false); };
+  const handleAdd = (e) => { e.preventDefault(); if (!firstName || !lastName) return; addAthlete({ firstName, lastName, birthday, gender, sport, teamLevel }); setFirstName(''); setLastName(''); setBirthday(''); setGender('Male'); setSport(''); setTeamLevel(''); setShowAdd(false); };
+  const startEdit = () => { if (!athlete) return; setFirstName(athlete.first_name); setLastName(athlete.last_name); setBirthday(athlete.date_of_birth ? String(athlete.date_of_birth).slice(0, 10) : ''); setGender(athlete.gender || 'Male'); setSport(athlete.sport || ''); setTeamLevel(athlete.team_level || ''); setEditingInfo(true); };
+  const saveEdit = () => { updateAthlete(selectedAthlete, { firstName, lastName, birthday, gender, sport, teamLevel, active: true }); setEditingInfo(false); };
 
   const filteredHistory = historyFilter ? athleteResults.filter(r => r.custom_test_id === historyFilter) : athleteResults;
   const sortedHistory = [...filteredHistory].sort((a, b) => new Date(b.tested_at) - new Date(a.tested_at));
@@ -1200,6 +1212,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                       <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor, textTransform: 'uppercase', letterSpacing: 1 }}>Name</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor }}>Gender</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor }}>Sport</th>
+                      {boardMode === 'team' && <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: accentColor }}>Level</th>}
                       {importTests.map(tid => { const t = getTestById(tid); return <th key={tid} style={{ padding: '10px 12px', textAlign: 'center', fontSize: 12, color: accentColor }}>{t?.name}</th>; })}
                     </tr>
                   </thead>
@@ -1209,6 +1222,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                         <td style={{ padding: '8px 12px', fontSize: 14, color: '#fff' }}>{row.first_name} {row.last_name}</td>
                         <td style={{ padding: '8px 12px', fontSize: 13, color: '#888' }}>{row.gender || '-'}</td>
                         <td style={{ padding: '8px 12px', fontSize: 13, color: '#888' }}>{row.sport || '-'}</td>
+                        {boardMode === 'team' && <td style={{ padding: '8px 12px', fontSize: 13, color: '#888' }}>{row.team_level || '-'}</td>}
                         {importTests.map(tid => { const t = getTestById(tid); const val = t ? row[t.name] : ''; return <td key={tid} style={{ padding: '8px 12px', textAlign: 'center', fontSize: 13, color: val ? '#00ff88' : '#555' }}>{val || '-'}</td>; })}
                       </tr>
                     ))}
@@ -1244,6 +1258,13 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
             <div><label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#888' }}>Birthday</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={{ width: '100%', ...iStyle }} /></div>
             <select value={gender} onChange={(e) => setGender(e.target.value)} style={iStyle}><option>Male</option><option>Female</option></select>
             <input type="text" placeholder="Sport (optional)" value={sport} onChange={(e) => setSport(e.target.value)} style={iStyle} />
+            {boardMode === 'team' && (
+              <select value={teamLevel} onChange={(e) => setTeamLevel(e.target.value)} style={iStyle}>
+                <option value="">Team Level...</option>
+                <option value="varsity">Varsity</option>
+                <option value="jv">JV</option>
+              </select>
+            )}
           </div>
           <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
             <button type="submit" style={{ padding: '12px 28px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer' }}>Add</button>
@@ -1264,7 +1285,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                     <div style={{ width: 36, height: 36, borderRadius: 8, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: accentColor }}>{(a.first_name || '').charAt(0)}{(a.last_name || '').charAt(0)}</div>
                     <h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
                   </div>
-                  <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{a.gender && (' · ' + a.gender)}{a.sport && (' · ' + a.sport)}</p>
+                  <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{a.gender && (' · ' + a.gender)}{a.sport && (' · ' + a.sport)}{a.team_level && (' · ' + (a.team_level === 'varsity' ? 'Varsity' : 'JV'))}</p>
                   <div style={{ marginTop: 12, display: 'flex', gap: 20 }}>
                     <div><span style={{ fontSize: 22, fontWeight: 700, color: accentColor }}>{ar.length}</span> <span style={{ fontSize: 12, color: '#888' }}>tests</span></div>
                     <div><span style={{ fontSize: 22, fontWeight: 700, color: '#00ff88' }}>{ar.filter(r => r.is_pr).length}</span> <span style={{ fontSize: 12, color: '#888' }}>PRs</span></div>
@@ -1287,6 +1308,13 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                   <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={iStyle} />
                   <select value={gender} onChange={(e) => setGender(e.target.value)} style={iStyle}><option>Male</option><option>Female</option></select>
                   <input type="text" placeholder="Sport" value={sport} onChange={(e) => setSport(e.target.value)} style={iStyle} />
+                  {boardMode === 'team' && (
+                    <select value={teamLevel} onChange={(e) => setTeamLevel(e.target.value)} style={iStyle}>
+                      <option value="">Team Level...</option>
+                      <option value="varsity">Varsity</option>
+                      <option value="jv">JV</option>
+                    </select>
+                  )}
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', gap: 8 }}><button onClick={saveEdit} style={{ padding: '8px 20px', background: '#00ff88', border: 'none', borderRadius: 6, color: '#0a1628', fontWeight: 700, cursor: 'pointer' }}>Save</button><button onClick={() => setEditingInfo(false)} style={{ padding: '8px 20px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer' }}>Cancel</button></div>
               </div>
@@ -1296,7 +1324,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                   <div style={{ width: 64, height: 64, borderRadius: 12, background: `${accentColor}22`, border: `2px solid ${accentColor}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 24, color: accentColor }}>{(athlete.first_name || '').charAt(0)}{(athlete.last_name || '').charAt(0)}</div>
                   <div>
                     <h2 style={{ margin: '0 0 4px 0', fontSize: 28, fontFamily: "'Archivo Black', sans-serif" }}>{athlete.first_name} {athlete.last_name}</h2>
-                    <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.date_of_birth) && calculateAge(athlete.date_of_birth) + ' yrs'}{athlete.gender && ' · ' + athlete.gender}{athlete.sport && ' · ' + athlete.sport} · {athleteResults.length} tests</p>
+                    <p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.date_of_birth) && calculateAge(athlete.date_of_birth) + ' yrs'}{athlete.gender && ' · ' + athlete.gender}{athlete.sport && ' · ' + athlete.sport}{athlete.team_level && (' · ' + (athlete.team_level === 'varsity' ? 'Varsity' : 'JV'))} · {athleteResults.length} tests</p>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -1746,9 +1774,11 @@ function KMJumpCalcPage({ athletes, setAthletes, results, logResults, getPR, get
 
 /* ===================== RECORD BOARD ===================== */
 function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, accentColor }) {
+  const boardMode = gym?.record_board_mode === 'team' ? 'team' : 'youth';
   const [tvMode, setTvMode] = useState(false);
   const [genderFilter, setGenderFilter] = useState('all');
   const [ageFilter, setAgeFilter] = useState('all');
+  const [levelFilter, setLevelFilter] = useState('all');
 
   const boardTests = customTests.filter(t => t.show_on_record_board && t.active);
   const speedTests = boardTests.filter(t => t.category === 'speed' || t.category === 'agility' || t.category === 'power');
@@ -1757,6 +1787,12 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
   const filterAthletes = (athleteId) => {
     const a = athletes.find(x => x.id === athleteId);
     if (!a) return false;
+    if (boardMode === 'team') {
+      if (levelFilter !== 'all') {
+        if ((a.team_level || '') !== levelFilter) return false;
+      }
+      return true;
+    }
     if (genderFilter !== 'all') {
       const g = (a.gender || '').toLowerCase();
       if (genderFilter === 'female' && g !== 'female') return false;
@@ -1802,12 +1838,18 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
 
   useEffect(() => { if (!tvMode) return; const i = setInterval(() => { document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: Math.random() * 1920, clientY: Math.random() * 1080 })); }, 600000); return () => clearInterval(i); }, [tvMode]);
 
+  // Belt-and-suspenders: live clock forces a re-render every second so the page is visibly alive
+  const [tvClock, setTvClock] = useState(new Date());
+  useEffect(() => { if (!tvMode) return; const i = setInterval(() => setTvClock(new Date()), 1000); return () => clearInterval(i); }, [tvMode]);
+
   const speedRecs = buildRecords(speedTests);
   const strRecs = buildRecords(strengthTests);
   const gold = '#C8963E';
   const rankColors = [gold, '#A0A0B0', '#A0622A', '#888', '#666'];
 
-  const filterLabel = genderFilter === 'all' && ageFilter === 'all' ? 'TOP 5 ALL-TIME' : 'TOP 5' + (genderFilter === 'male' ? ' BOYS' : genderFilter === 'female' ? ' GIRLS' : '') + (ageFilter === '15+' ? ' 15+' : ageFilter === '14u' ? ' 14 & UNDER' : '');
+  const filterLabel = boardMode === 'team'
+    ? (levelFilter === 'all' ? 'TOP 5 ALL-TIME' : 'TOP 5 ' + (levelFilter === 'varsity' ? 'VARSITY' : 'JV'))
+    : (genderFilter === 'all' && ageFilter === 'all' ? 'TOP 5 ALL-TIME' : 'TOP 5' + (genderFilter === 'male' ? ' BOYS' : genderFilter === 'female' ? ' GIRLS' : '') + (ageFilter === '15+' ? ' 15+' : ageFilter === '14u' ? ' 14 & UNDER' : ''));
 
   const renderCard = (test, records, isTv) => {
     const list = records[test.id] || [];
@@ -1829,16 +1871,26 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
 
   const renderFilterBar = (compact) => (
     <div style={{ display: 'flex', gap: compact ? 6 : 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
-        {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
-          <button key={v} onClick={() => setGenderFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: genderFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: genderFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: genderFilter === v ? accentColor : '#666', fontWeight: genderFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
-        {[['all', 'All Ages'], ['15+', '15+'], ['14u', '14 & Under']].map(([v, l]) => (
-          <button key={v} onClick={() => setAgeFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: ageFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: ageFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: ageFilter === v ? accentColor : '#666', fontWeight: ageFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
-        ))}
-      </div>
+      {boardMode === 'team' ? (
+        <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+          {[['all', 'All'], ['varsity', 'Varsity'], ['jv', 'JV']].map(([v, l]) => (
+            <button key={v} onClick={() => setLevelFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: levelFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: levelFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: levelFilter === v ? accentColor : '#666', fontWeight: levelFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+            {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
+              <button key={v} onClick={() => setGenderFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: genderFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: genderFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: genderFilter === v ? accentColor : '#666', fontWeight: genderFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+            {[['all', 'All Ages'], ['15+', '15+'], ['14u', '14 & Under']].map(([v, l]) => (
+              <button key={v} onClick={() => setAgeFilter(v)} style={{ padding: compact ? '6px 12px' : '8px 16px', background: ageFilter === v ? `${accentColor}33` : 'transparent', border: 'none', borderBottom: ageFilter === v ? `2px solid ${accentColor}` : '2px solid transparent', color: ageFilter === v ? accentColor : '#666', fontWeight: ageFilter === v ? 700 : 400, cursor: 'pointer', fontSize: compact ? 12 : 13 }}>{l}</button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 
@@ -1858,7 +1910,14 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
             <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 4, color: gold }}>{filterLabel}</div>
             {renderFilterBar(true)}
           </div>
-          <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#888', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#00ff88', boxShadow: '0 0 6px #00ff88', animation: 'kmPulse 1.6s ease-in-out infinite' }}></span>
+              {tvClock.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+            </div>
+            <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT</button>
+          </div>
+          <style>{`@keyframes kmPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }`}</style>
         </div>
         {speedTests.length > 0 && (<><div style={{ fontSize: 18, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 10, marginBottom: 8 }}>SPEED & POWER</div><div style={{ display: 'grid', gridTemplateColumns: `repeat(${speedTests.length}, 1fr)`, gap: 8, marginBottom: 10 }}>{speedTests.map(t => renderCard(t, speedRecs, true))}</div></>)}
         {strengthTests.length > 0 && (<><div style={{ fontSize: 18, color: accentColor, letterSpacing: 3, borderLeft: `4px solid ${accentColor}`, paddingLeft: 10, marginBottom: 8 }}>STRENGTH</div><div style={{ display: 'grid', gridTemplateColumns: `repeat(${strengthTests.length}, 1fr)`, gap: 8 }}>{strengthTests.map(t => renderCard(t, strRecs, true))}</div></>)}
@@ -1899,6 +1958,7 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
   const [gymFormColor, setGymFormColor] = useState('');
   const [gymFormLetter, setGymFormLetter] = useState('');
   const [gymFormLogoUrl, setGymFormLogoUrl] = useState('');
+  const [gymFormBoardMode, setGymFormBoardMode] = useState('youth');
   const [savingGym, setSavingGym] = useState(false);
   const logoFileRef = useRef(null);
 
@@ -1935,6 +1995,7 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
     setGymFormColor(gym?.primary_color || '#00d4ff');
     setGymFormLetter(gym?.logo_letter || '');
     setGymFormLogoUrl(gym?.logo_url || '');
+    setGymFormBoardMode(gym?.record_board_mode || 'youth');
     setEditingGym(true);
   };
 
@@ -1945,7 +2006,8 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
       name: gymFormName.trim(),
       primary_color: gymFormColor,
       logo_letter: gymFormLetter || gymFormName.charAt(0).toUpperCase(),
-      logo_url: gymFormLogoUrl || null
+      logo_url: gymFormLogoUrl || null,
+      record_board_mode: gymFormBoardMode
     };
     const { error } = await supabase.from('gyms').update(updates).eq('id', gymId);
     if (!error) {
@@ -2052,6 +2114,23 @@ function KMSettingsPage({ gym, setGym, customTests, setCustomTests, gymId, showN
                 {colorOptions.map(c => (
                   <div key={c} onClick={() => setGymFormColor(c)} style={{ width: 36, height: 36, borderRadius: 8, background: c, cursor: 'pointer', border: gymFormColor === c ? '3px solid #fff' : '3px solid transparent', transition: 'all 0.15s' }} />
                 ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 12, color: '#888' }}>Record Board Mode</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                {[
+                  { v: 'youth', title: 'Youth / Club', desc: 'Shows Boys, Girls, 15+ and 14 & Under filters' },
+                  { v: 'team', title: 'School Team', desc: 'Shows Varsity and JV filters (no gender filter)' }
+                ].map(opt => {
+                  const active = gymFormBoardMode === opt.v;
+                  return (
+                    <div key={opt.v} onClick={() => setGymFormBoardMode(opt.v)} style={{ padding: 14, borderRadius: 8, background: active ? `${accentColor}18` : 'rgba(255,255,255,0.03)', border: active ? `2px solid ${accentColor}` : '2px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: active ? accentColor : '#fff', marginBottom: 4 }}>{opt.title}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>{opt.desc}</div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
