@@ -75,11 +75,26 @@ const formatTestValueByDef = (testDef, value) => {
   const v = parseFloat(value);
   if (isNaN(v)) return '-';
   if (!testDef) return String(v);
+  // Fly-to-MPH conversion: raw stored as seconds, display as MPH (suffix included so callers do not double-append)
+  const cf = testDef.conversion_formula;
+  if (cf && cf.type === 'fly_to_mph' && cf.distance_yards && v > 0) {
+    const meters = cf.distance_yards * 0.9144;
+    return (meters / v * 2.237).toFixed(2) + ' MPH';
+  }
   if (testDef.feet_inches) return formatFeetInches(v);
-  const unit = testDef.display_unit || testDef.unit;
-  if (unit === 'sec' || unit === 'ratio') return v.toFixed(2);
-  if (unit === 'MPH') return v.toFixed(1);
-  if (unit === 'inches') return String(Math.round(v * 10) / 10);
+  const display = testDef.display_unit;
+  const unit = testDef.unit;
+  if (display === 'ft-in' || display === "ft'in") return formatFeetInches(v);
+  // Time-style tests: 2 decimals
+  if (unit === 'time' || display === 'sec' || display === 'ratio') return v.toFixed(2);
+  // Legacy: MPH stored directly (no formula)
+  if (display === 'MPH') return v.toFixed(2) + ' MPH';
+  // Distance: 1 decimal so 36.6 stays 36.6
+  if (unit === 'distance' || display === 'in' || display === 'inches' || display === 'cm') return v.toFixed(1);
+  // Weight / reps: integer
+  if (unit === 'weight' || display === 'lbs' || display === 'kg' || display === 'reps') return String(Math.round(v));
+  // Score with no explicit display unit: assume ratio (RSI etc.), 2 decimals
+  if (unit === 'score' && !display) return v.toFixed(2);
   return String(Math.round(v));
 };
 
@@ -87,7 +102,13 @@ const formatResultWithUnit = (testDef, value) => {
   if (!testDef) return String(value);
   const formatted = formatTestValueByDef(testDef, value);
   if (testDef.feet_inches) return formatted;
-  const unit = testDef.display_unit || testDef.unit;
+  // If the formatter already attached a unit (MPH) or formatted as feet+inches, do not double-append
+  if (formatted.includes(' MPH') || formatted.includes("'")) return formatted;
+  const display = testDef.display_unit;
+  if (display === 'ft-in' || display === "ft'in") return formatted;
+  // Skip generic internal unit names so we do not render "1.16 time" or "300 weight"
+  const internal = new Set(['time', 'distance', 'weight', 'score']);
+  const unit = display || (internal.has(testDef.unit) ? '' : testDef.unit);
   return formatted + (unit ? ' ' + unit : '');
 };
 
@@ -105,16 +126,15 @@ const applyConversion = (testDef, rawValue) => {
 };
 
 const getFlyMPH = (testDef, timeInSeconds) => {
+  // Only compute MPH when the test explicitly opts in via conversion_formula.
+  // Name-based auto-detection caused unwanted MPH on tests like 5-10 Fly.
   if (!testDef || !timeInSeconds) return null;
   const t = parseFloat(timeInSeconds);
   if (isNaN(t) || t <= 0) return null;
-  const name = (testDef.name || '').toLowerCase();
-  const isFly = name.includes('fly') || name.includes('10-yard fly') || name.includes('5-10');
-  const hasFormula = testDef.conversion_formula && testDef.conversion_formula.type === 'fly_to_mph';
-  if (!isFly && !hasFormula) return null;
-  const distYards = hasFormula ? testDef.conversion_formula.distance_yards : 10;
-  const meters = distYards * 0.9144;
-  return parseFloat((meters / t * 2.237).toFixed(1));
+  const cf = testDef.conversion_formula;
+  if (!cf || cf.type !== 'fly_to_mph' || !cf.distance_yards) return null;
+  const meters = cf.distance_yards * 0.9144;
+  return parseFloat((meters / t * 2.237).toFixed(2));
 };
 
 /* ===================== ATHLETE SCORE (TSA) ===================== */
@@ -578,6 +598,7 @@ export default function App() {
   const [athletes, setAthletes] = useState([]);
   const [results, setResults] = useState([]);
   const [customTests, setCustomTests] = useState([]);
+  const [assessments, setAssessments] = useState([]);
   const [notification, setNotification] = useState(null);
   const [appLoading, setAppLoading] = useState(true);
 
@@ -641,6 +662,8 @@ export default function App() {
         from += 500;
       }
       setResults(allResults);
+      const { data: asmts } = await supabase.from('athlete_assessments').select('*').eq('gym_id', gymId);
+      if (asmts) setAssessments(asmts);
       setAppLoading(false);
     };
     loadData();
@@ -722,6 +745,29 @@ export default function App() {
     if (error) showNotification('Error: ' + error.message, 'error');
   };
 
+  const getAssessment = (athleteId) => assessments.find(a => a.athlete_id === athleteId) || null;
+
+  const saveAssessment = async (athleteId, fields) => {
+    const payload = {
+      gym_id: gymId,
+      athlete_id: athleteId,
+      goals: fields.goals || '',
+      training_history: fields.training_history || '',
+      injury_history: fields.injury_history || '',
+      notes: fields.notes || '',
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from('athlete_assessments').upsert(payload, { onConflict: 'athlete_id' }).select();
+    if (error) { showNotification('Error saving assessment', 'error'); return; }
+    if (data && data[0]) {
+      setAssessments(prev => {
+        const filtered = prev.filter(a => a.athlete_id !== athleteId);
+        return [...filtered, data[0]];
+      });
+      showNotification('Assessment saved!');
+    }
+  };
+
   const updateAthlete = async (id, updates) => {
     const { error } = await supabase.from('athletes').update({
       first_name: updates.firstName, last_name: updates.lastName,
@@ -739,7 +785,7 @@ export default function App() {
     if (!window.confirm(`Delete ${name} and all their results?`)) return;
     await supabase.from('test_results').delete().eq('athlete_id', id);
     const { error } = await supabase.from('athletes').delete().eq('id', id);
-    if (!error) { setAthletes(athletes.filter(a => a.id !== id)); setResults(results.filter(r => r.athlete_id !== id)); showNotification(name + ' deleted'); }
+    if (!error) { setAthletes(athletes.filter(a => a.id !== id)); setResults(results.filter(r => r.athlete_id !== id)); setAssessments(assessments.filter(a => a.athlete_id !== id)); showNotification(name + ' deleted'); }
   };
 
   const deleteResult = async (id) => {
@@ -794,6 +840,7 @@ export default function App() {
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
     { id: 'athletes', label: 'Athletes' },
+    { id: 'assessments', label: '📝 Assessments' },
     { id: 'recentprs', label: '🔥 PRs & Results' },
     ...(hasJumpCalc ? [{ id: 'jumpcalc', label: '📏 Jump Calc' }] : []),
     { id: 'recordboard', label: '🏆 Record Board' },
@@ -870,7 +917,8 @@ export default function App() {
 
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <KMTestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} accentColor={accentColor} />}
-        {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} gym={gym} showNotification={showNotification} />}
+        {page === 'athletes' && <KMAthletesPage athletes={athletes} setAthletes={setAthletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} setResults={setResults} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} getTestsByCategory={getTestsByCategory} deleteResult={deleteResult} updateResult={updateResultRecord} accentColor={accentColor} gymId={gymId} gym={gym} showNotification={showNotification} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
+        {page === 'assessments' && <KMAssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} accentColor={accentColor} />}
         {page === 'recentprs' && <KMRecentPRsPage athletes={athletes} results={results} getTestById={getTestById} customTests={customTests} accentColor={accentColor} />}
         {page === 'jumpcalc' && <KMJumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} getTestById={getTestById} customTests={customTests} accentColor={accentColor} gymId={gymId} showNotification={showNotification} />}
         {page === 'recordboard' && <KMRecordBoardPage athletes={athletes} results={results} customTests={customTests} getTestById={getTestById} gym={gym} accentColor={accentColor} />}
@@ -1414,7 +1462,7 @@ function KMAthletesPage({ athletes, setAthletes, addAthlete, updateAthlete, dele
                   <h4 style={{ color: accentColor, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{cat}</h4>
                   {tests.map(t => { const pr = getPR(athlete.id, t.id); return (
                     <div key={t.id} onClick={() => { setProfileTab('progress'); setSelectedTest(t.id); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 14, cursor: 'pointer' }}>
-                      <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}{pr !== null && getFlyMPH(t, pr) ? <span style={{ color: accentColor, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>{getFlyMPH(t, pr)} MPH</span> : ''}</span>
+                      <span style={{ color: '#aaa' }}>{t.name}</span><span style={{ fontWeight: 600, color: pr !== null ? '#00ff88' : '#555' }}>{pr !== null ? formatResultWithUnit(t, pr) : '-'}</span>
                     </div>
                   ); })}
                 </div>
@@ -1833,6 +1881,8 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
       }
       return true;
     }
+    // Youth board: keep adults off all youth filters (15+, 14&under, All Ages)
+    if ((a.type || 'youth') === 'adult') return false;
     if (genderFilter !== 'all') {
       const g = (a.gender || '').toLowerCase();
       if (genderFilter === 'female' && g !== 'female') return false;
@@ -1897,10 +1947,9 @@ function KMRecordBoardPage({ athletes, results, customTests, getTestById, gym, a
       <div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ textAlign: 'center', fontSize: isTv ? 14 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: `2px solid ${gold}`, letterSpacing: 1 }}>{test.name}</div>
         {list.length > 0 ? list.map((r, i) => {
-          const mph = getFlyMPH(test, r.value);
           return (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: `linear-gradient(90deg, ${gold}44 0%, ${gold}0d 100%)`, borderLeft: `3px solid ${gold}` } : {}) }}>
-              <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: rankColors[i] || '#666' }}>{formatTestValueByDef(test, r.value)}{mph ? <span style={{ color: accentColor, fontSize: isTv ? 10 : 11, fontWeight: 400, marginLeft: 4 }}>{mph} MPH</span> : ''}</span>
+              <span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: rankColors[i] || '#666' }}>{formatTestValueByDef(test, r.value)}</span>
               <span style={{ color: '#888', fontSize: isTv ? 12 : 13 }}>{r.name}</span>
             </div>
           );
