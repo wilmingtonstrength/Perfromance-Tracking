@@ -253,6 +253,91 @@ function SimpleChart({ data, direction, testDef, onPointClick }) {
   );
 }
 
+/* ===================== VOICE INPUT HELPERS ===================== */
+const SR_AVAILABLE = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+const _normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+const _digitWords = { '0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine','10':'ten' };
+const _digitsToWords = (s) => s.replace(/\d+/g, n => _digitWords[n] || n);
+const _wordsToDigits = (s) => {
+  const map = { zero:'0', one:'1', two:'2', three:'3', four:'4', five:'5', six:'6', seven:'7', eight:'8', nine:'9', ten:'10' };
+  return s.replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, w => map[w] || w);
+};
+const _levenshtein = (a, b) => {
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const m = Array.from({ length: b.length + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= a.length; j++) m[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      m[i][j] = b[i - 1] === a[j - 1] ? m[i - 1][j - 1] : Math.min(m[i - 1][j - 1], m[i - 1][j], m[i][j - 1]) + 1;
+    }
+  }
+  return m[b.length][a.length];
+};
+
+// Find athletes named in the transcript. Returns array of athlete IDs.
+// Logic: tokenise transcript, fuzzy match each token to athlete first names.
+// If multiple athletes share a first name, require the last name to also appear in the transcript.
+const findAthleteMatches = (transcript, athletes, filterType) => {
+  const norm = _normalize(transcript);
+  const tokens = norm.split(' ').filter(Boolean);
+  if (tokens.length === 0) return [];
+  const pool = athletes.filter(a => !filterType || (a.type || 'athlete') === filterType);
+  const firstNameCounts = {};
+  pool.forEach(a => {
+    const fn = _normalize(a.first_name);
+    firstNameCounts[fn] = (firstNameCounts[fn] || 0) + 1;
+  });
+  const out = new Set();
+  pool.forEach(a => {
+    const fn = _normalize(a.first_name);
+    const ln = _normalize(a.last_name);
+    if (!fn) return;
+    let firstHit = tokens.includes(fn);
+    if (!firstHit && fn.length >= 4) {
+      // fuzzy: tolerate 1 edit for 4-6 char names, 2 edits for 7+
+      const tol = fn.length >= 7 ? 2 : 1;
+      firstHit = tokens.some(t => t.length >= 3 && _levenshtein(t, fn) <= tol);
+    }
+    if (!firstHit) return;
+    if (firstNameCounts[fn] > 1) {
+      // ambiguous first name — require last-name match to disambiguate
+      let lnHit = ln && (tokens.includes(ln) || (ln.length >= 4 && tokens.some(t => t.length >= 3 && _levenshtein(t, ln) <= 1)));
+      if (!lnHit) return;
+    }
+    out.add(a.id);
+  });
+  return Array.from(out);
+};
+
+// Find tests named in the transcript. Returns array of test IDs.
+// Tries multiple normalisations to handle "5-10 fly" vs "five ten fly" vs "510 fly".
+const findTestMatches = (transcript, testList) => {
+  const norm = _normalize(transcript);
+  const normD = _digitsToWords(norm);
+  const normW = _wordsToDigits(norm);
+  const out = new Set();
+  testList.forEach(t => {
+    const variants = [];
+    const baseName = _normalize(t.name || '');
+    if (baseName) {
+      variants.push(baseName);
+      variants.push(_digitsToWords(baseName));
+      variants.push(_wordsToDigits(baseName));
+    }
+    if (Array.isArray(t._aliases)) t._aliases.forEach(a => variants.push(_normalize(a)));
+    for (const v of variants) {
+      if (!v || v.length < 3) continue;
+      if (norm.includes(v) || normD.includes(v) || normW.includes(v)) {
+        out.add(t.id);
+        break;
+      }
+    }
+  });
+  return Array.from(out);
+};
+
 /* ===================== MAIN APP ===================== */
 export default function App() {
   const [page, setPage] = useState('entry');
@@ -439,16 +524,175 @@ export default function App() {
   );
 }
 
+/* ===================== VOICE CAPTURE (Test Entry helper) ===================== */
+function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestIds, onAddAthlete, onSelectTest, athletesById, testsById }) {
+  const [listening, setListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const recRef = useRef(null);
+  const silenceRef = useRef(null);
+  const seenAthletesRef = useRef(new Set());
+  const seenTestsRef = useRef(new Set());
+  const addedRef = useRef({ athletes: [], tests: [] });
+
+  const stop = () => {
+    if (recRef.current) { try { recRef.current.stop(); } catch {} recRef.current = null; }
+    if (silenceRef.current) { clearTimeout(silenceRef.current); silenceRef.current = null; }
+    setListening(false);
+  };
+
+  const resetSilence = () => {
+    if (silenceRef.current) clearTimeout(silenceRef.current);
+    silenceRef.current = setTimeout(() => { stop(); }, 5000);
+  };
+
+  const processTranscript = (text) => {
+    if (!text || !text.trim()) return;
+    const aMatches = findAthleteMatches(text, athletes, entryMode).filter(id => !seenAthletesRef.current.has(id));
+    aMatches.forEach(id => {
+      seenAthletesRef.current.add(id);
+      onAddAthlete(id);
+      addedRef.current.athletes.push(id);
+    });
+    const tMatches = findTestMatches(text, testList).filter(id => !seenTestsRef.current.has(id));
+    tMatches.forEach(id => {
+      seenTestsRef.current.add(id);
+      onSelectTest(id);
+      addedRef.current.tests.push(id);
+    });
+    if (aMatches.length || tMatches.length) {
+      const aNames = addedRef.current.athletes.map(id => { const a = athletesById(id); return a ? a.first_name : id; });
+      const tNames = addedRef.current.tests.map(id => { const t = testsById(id); return t ? t.name : id; });
+      setFeedback({ athletes: aNames, tests: tNames });
+    }
+  };
+
+  const start = () => {
+    if (listening) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    // Pre-seed seen sets with already-on-screen items so we don't try to re-add them.
+    seenAthletesRef.current = new Set(rosterIds || []);
+    seenTestsRef.current = new Set(selectedTestIds || []);
+    addedRef.current = { athletes: [], tests: [] };
+    setTranscript('');
+    setFeedback(null);
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    let accumFinal = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) accumFinal += ' ' + r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      const display = (accumFinal + ' ' + interim).trim();
+      setTranscript(display);
+      processTranscript(display);
+      resetSilence();
+    };
+    rec.onerror = (e) => {
+      if (e.error !== 'no-speech' && e.error !== 'aborted') stop();
+    };
+    rec.onend = () => {
+      // Browser may end recognition on its own (especially iOS). User can tap to resume.
+      if (silenceRef.current) { clearTimeout(silenceRef.current); silenceRef.current = null; }
+      recRef.current = null;
+      setListening(false);
+    };
+    try {
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+      resetSilence();
+    } catch (err) {
+      console.warn('Voice start failed:', err);
+    }
+  };
+
+  useEffect(() => () => stop(), []); // cleanup on unmount
+
+  return (
+    <div style={{ background: listening ? 'rgba(255,80,80,0.08)' : 'rgba(0,212,255,0.05)', borderRadius: 12, padding: 16, marginBottom: 20, border: `1px solid ${listening ? 'rgba(255,80,80,0.35)' : 'rgba(0,212,255,0.2)'}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <button
+          onClick={listening ? stop : start}
+          style={{
+            width: 64, height: 64, borderRadius: '50%',
+            background: listening ? 'linear-gradient(135deg, #ff4d4d 0%, #cc0000 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)',
+            border: 'none', cursor: 'pointer', fontSize: 28, color: '#0a1628', fontWeight: 700, lineHeight: 1,
+            boxShadow: listening ? '0 0 0 6px rgba(255,77,77,0.25)' : '0 4px 16px rgba(0,212,255,0.3)',
+            animation: listening ? 'wsMicPulse 1s infinite' : 'none'
+          }}
+          aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+        >🎤</button>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: listening ? '#ff8a8a' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>
+            {listening ? 'Listening…' : 'Voice Entry'}
+          </div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: 6, lineHeight: 1.4 }}>
+            {listening
+              ? 'Say names ("Cameron, Becca, Josiah") and tests ("max velocity, five-ten fly"). Auto-stops after 5s of silence. Tap mic to stop.'
+              : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.'}
+          </div>
+        </div>
+      </div>
+      {(transcript || feedback) && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          {transcript && <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic', marginBottom: feedback ? 8 : 0 }}>"{transcript}"</div>}
+          {feedback && (
+            <div style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+              {feedback.athletes.length > 0 && <span style={{ color: '#00ff88' }}>Added: <strong>{feedback.athletes.join(', ')}</strong></span>}
+              {feedback.tests.length > 0 && <span style={{ color: '#00d4ff' }}>Tests: <strong>{feedback.tests.join(', ')}</strong></span>}
+            </div>
+          )}
+        </div>
+      )}
+      <style>{`@keyframes wsMicPulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,77,0.5); } 70% { box-shadow: 0 0 0 14px rgba(255,77,77,0); } 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); } }`}</style>
+    </div>
+  );
+}
+
 /* ===================== TEST ENTRY PAGE ===================== */
 function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
-  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedTests, setSelectedTests] = useState([]);
-  const [useKg, setUseKg] = useState(false);
-  const [athleteRows, setAthleteRows] = useState([]);
+  // Persist Test Entry state across navigation. Prevents accidental nav taps from
+  // wiping the roster mid-session. Cleared explicitly via the Clear button or on submit.
+  const STORAGE_KEY = 'ws_testentry_state_v1';
+  // Read localStorage ONCE on mount via useState's lazy initializer trick.
+  const [saved] = useState(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
+  const [testDate, setTestDate] = useState(() => (saved && saved.testDate) || new Date().toISOString().split('T')[0]);
+  const [selectedTests, setSelectedTests] = useState(() => (saved && Array.isArray(saved.selectedTests)) ? saved.selectedTests : []);
+  const [useKg, setUseKg] = useState(() => (saved && typeof saved.useKg === 'boolean') ? saved.useKg : false);
+  const [athleteRows, setAthleteRows] = useState(() => (saved && Array.isArray(saved.athleteRows)) ? saved.athleteRows : []);
   const [submittedResults, setSubmittedResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [entryMode, setEntryMode] = useState('athlete');
+  const [entryMode, setEntryMode] = useState(() => (saved && saved.entryMode) || 'athlete');
+
+  // Autosave to localStorage whenever any persisted slice changes.
+  useEffect(() => {
+    try {
+      const payload = { testDate, entryMode, selectedTests, useKg, athleteRows };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {}
+  }, [testDate, entryMode, selectedTests, useKg, athleteRows]);
+
+  const clearAll = () => {
+    if (athleteRows.length === 0 && selectedTests.length === 0) return;
+    if (!window.confirm('Clear all selected tests and athletes? This wipes the current session entry.')) return;
+    setSelectedTests([]);
+    setAthleteRows([]);
+    setUseKg(false);
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
+  };
 
   const testSet = getTestsForType(entryMode);
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.allow_kg; });
@@ -527,10 +771,34 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
     );
   }
 
+  const flatTestList = Object.values(testSet).flat();
+  const hasSessionState = selectedTests.length > 0 || athleteRows.length > 0;
+
   return (
     <div>
-      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
-      <p style={{ color: '#888', marginBottom: 24 }}>Select your tests, add athletes, enter results</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
+          <p style={{ color: '#888', marginBottom: 0 }}>Select your tests, add athletes, enter results</p>
+        </div>
+        {hasSessionState && (
+          <button onClick={clearAll} title="Wipe current selections and athletes" style={{ padding: '10px 18px', background: 'rgba(255,100,100,0.12)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff8a8a', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Clear All</button>
+        )}
+      </div>
+      <div style={{ height: 24 }} />
+      {SR_AVAILABLE && (
+        <VoiceCapture
+          athletes={athletes}
+          testList={flatTestList}
+          entryMode={entryMode}
+          rosterIds={usedAthleteIds}
+          selectedTestIds={selectedTests}
+          onAddAthlete={(id) => addAthleteRow(id)}
+          onSelectTest={(id) => { if (!selectedTests.includes(id)) toggleTest(id); }}
+          athletesById={(id) => athletes.find(a => a.id === id)}
+          testsById={getTestById}
+        />
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button onClick={() => switchMode('athlete')} style={{ padding: '10px 24px', background: entryMode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'athlete' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Youth Athletes</button>
         <button onClick={() => switchMode('adult')} style={{ padding: '10px 24px', background: entryMode === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'adult' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'adult' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Adult Clients</button>
