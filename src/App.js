@@ -277,36 +277,41 @@ const _levenshtein = (a, b) => {
 };
 
 // Find athletes named in the transcript. Returns array of athlete IDs.
-// Logic: tokenise transcript, fuzzy match each token to athlete first names.
-// If multiple athletes share a first name, require the last name to also appear in the transcript.
+// Scoring rules (highest match wins):
+//   pair hit: "first last" or "last first" appears -> add
+//   both first+last fuzzy hit separately -> add
+//   unique last name (>=4 chars) hit -> add (last names are more distinctive)
+//   unique first name hit -> add
+//   ambiguous first name hit without last-name confirmation -> SKIP (no guess)
 const findAthleteMatches = (transcript, athletes, filterType) => {
   const norm = _normalize(transcript);
   const tokens = norm.split(' ').filter(Boolean);
   if (tokens.length === 0) return [];
   const pool = athletes.filter(a => !filterType || (a.type || 'athlete') === filterType);
   const firstNameCounts = {};
+  const lastNameCounts = {};
   pool.forEach(a => {
     const fn = _normalize(a.first_name);
-    firstNameCounts[fn] = (firstNameCounts[fn] || 0) + 1;
+    const ln = _normalize(a.last_name);
+    if (fn) firstNameCounts[fn] = (firstNameCounts[fn] || 0) + 1;
+    if (ln) lastNameCounts[ln] = (lastNameCounts[ln] || 0) + 1;
   });
+  const fuzzyTokenHit = (target, tol) => tokens.some(t => t.length >= 3 && _levenshtein(t, target) <= tol);
   const out = new Set();
   pool.forEach(a => {
     const fn = _normalize(a.first_name);
     const ln = _normalize(a.last_name);
     if (!fn) return;
-    let firstHit = tokens.includes(fn);
-    if (!firstHit && fn.length >= 4) {
-      // fuzzy: tolerate 1 edit for 4-6 char names, 2 edits for 7+
-      const tol = fn.length >= 7 ? 2 : 1;
-      firstHit = tokens.some(t => t.length >= 3 && _levenshtein(t, fn) <= tol);
-    }
-    if (!firstHit) return;
-    if (firstNameCounts[fn] > 1) {
-      // ambiguous first name — require last-name match to disambiguate
-      let lnHit = ln && (tokens.includes(ln) || (ln.length >= 4 && tokens.some(t => t.length >= 3 && _levenshtein(t, ln) <= 1)));
-      if (!lnHit) return;
-    }
-    out.add(a.id);
+    const fnTol = fn.length >= 7 ? 2 : (fn.length >= 4 ? 1 : 0);
+    const lnTol = ln && ln.length >= 7 ? 2 : (ln && ln.length >= 4 ? 1 : 0);
+    const fnHit = tokens.includes(fn) || (fnTol > 0 && fuzzyTokenHit(fn, fnTol));
+    const lnHit = ln && (tokens.includes(ln) || (lnTol > 0 && fuzzyTokenHit(ln, lnTol)));
+    const pairHit = ln && (norm.includes(fn + ' ' + ln) || norm.includes(ln + ' ' + fn));
+    if (pairHit) { out.add(a.id); return; }
+    if (fnHit && lnHit) { out.add(a.id); return; }
+    if (lnHit && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
+    if (fnHit && firstNameCounts[fn] === 1) { out.add(a.id); return; }
+    // ambiguous — skip rather than guess wrong
   });
   return Array.from(out);
 };
@@ -580,18 +585,30 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
+    rec.maxAlternatives = 3; // ask for top-3 candidates per phrase to recover tricky names
     rec.lang = 'en-US';
-    let accumFinal = '';
+    let accumDisplay = ''; // best-guess only, for the visible transcript
+    let accumMatch = '';   // all alternatives concatenated, fed to the matcher
     rec.onresult = (e) => {
-      let interim = '';
+      let interimDisplay = '';
+      let interimMatch = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) accumFinal += ' ' + r[0].transcript;
-        else interim += r[0].transcript;
+        if (r.isFinal) {
+          accumDisplay += ' ' + r[0].transcript;
+          // Pool all alternatives so an unusual surname can still match even when
+          // the recognizer's top guess is something else entirely.
+          const altCount = Math.min(r.length || 1, 3);
+          for (let j = 0; j < altCount; j++) accumMatch += ' ' + r[j].transcript;
+        } else {
+          interimDisplay += r[0].transcript;
+          interimMatch += r[0].transcript;
+        }
       }
-      const display = (accumFinal + ' ' + interim).trim();
+      const display = (accumDisplay + ' ' + interimDisplay).trim();
+      const matchText = (accumMatch + ' ' + interimMatch).trim();
       setTranscript(display);
-      processTranscript(display);
+      processTranscript(matchText);
       resetSilence();
     };
     rec.onerror = (e) => {
@@ -697,12 +714,30 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
   const testSet = getTestsForType(entryMode);
   const anyStrength = selectedTests.some(tid => { const t = getTestById(tid); return t && t.allow_kg; });
   const initValForTest = (tid) => { const t = getTestById(tid); if (isMultiRepTest(t)) return Array(getMultiRepCount(t)).fill(''); return ''; };
+  // Functional setState updaters so rapid voice-driven calls (multiple athletes in one
+  // breath) don't clobber each other via stale closures.
   const toggleTest = (testId) => {
-    if (selectedTests.includes(testId)) { setSelectedTests(selectedTests.filter(t => t !== testId)); setAthleteRows(athleteRows.map(row => { const nv = { ...row.values }; delete nv[testId]; return { ...row, values: nv }; })); }
-    else { setSelectedTests([...selectedTests, testId]); setAthleteRows(athleteRows.map(row => ({ ...row, values: { ...row.values, [testId]: initValForTest(testId) } }))); }
+    setSelectedTests(prev => {
+      const isAdding = !prev.includes(testId);
+      setAthleteRows(rows => rows.map(row => {
+        const nv = { ...row.values };
+        if (isAdding) nv[testId] = initValForTest(testId);
+        else delete nv[testId];
+        return { ...row, values: nv };
+      }));
+      return isAdding ? [...prev, testId] : prev.filter(t => t !== testId);
+    });
   };
   const switchMode = (mode) => { setEntryMode(mode); setSelectedTests([]); setAthleteRows([]); };
-  const addAthleteRow = (athleteId) => { if (!athleteId || athleteRows.find(r => r.athleteId === athleteId)) return; const values = {}; selectedTests.forEach(tid => { values[tid] = initValForTest(tid); }); setAthleteRows([...athleteRows, { athleteId, values }]); };
+  const addAthleteRow = (athleteId) => {
+    if (!athleteId) return;
+    setAthleteRows(prev => {
+      if (prev.find(r => r.athleteId === athleteId)) return prev;
+      const values = {};
+      selectedTests.forEach(tid => { values[tid] = initValForTest(tid); });
+      return [...prev, { athleteId, values }];
+    });
+  };
   const removeAthleteRow = (index) => setAthleteRows(athleteRows.filter((_, i) => i !== index));
   const updateValue = (rowIndex, testId, value) => { const nr = [...athleteRows]; nr[rowIndex] = { ...nr[rowIndex], values: { ...nr[rowIndex].values, [testId]: value } }; setAthleteRows(nr); };
   const updateRepValue = (rowIndex, testId, repIdx, value) => {
