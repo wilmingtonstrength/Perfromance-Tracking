@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@netlify/blobs": "^8.1.0",
     "@supabase/supabase-js": "^2.95.3",
     "openai": "^4.79.4",
     "react": "18.1.0",

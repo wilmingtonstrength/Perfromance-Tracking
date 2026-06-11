@@ -3,12 +3,24 @@
 // client never sits waiting on a synchronous proxy that has its own ~10s
 // inactivity timeout (which was producing the 504 the coach was seeing).
 //
-// The client generates a job_id (UUID) and includes it in the POST body. This
-// function stores the result in Netlify Blobs under that key. The client polls
+// Result is stored in the Supabase transcription_jobs table; the client polls
 // `/.netlify/functions/transcribe-status?id=<job_id>` until done.
 
 const { OpenAI, toFile } = require('openai');
-const { getStore } = require('@netlify/blobs');
+const { createClient } = require('@supabase/supabase-js');
+
+const getSupabase = () => {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+const setJob = async (supabase, jobId, fields) => {
+  // upsert so 'pending' insert + later 'done' update both use the same call.
+  const row = { id: jobId, ...fields };
+  await supabase.from('transcription_jobs').upsert(row, { onConflict: 'id' });
+};
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -30,12 +42,18 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: 'Missing audio' };
   }
 
-  const store = getStore('transcriptions');
-  await store.setJSON(jobId, { status: 'pending', createdAt: new Date().toISOString() });
+  const supabase = getSupabase();
+  if (!supabase) {
+    // No DB to write to — can't even record the error.
+    console.error('Supabase env vars not set');
+    return { statusCode: 202 };
+  }
+
+  await setJob(supabase, jobId, { status: 'pending' });
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    await store.setJSON(jobId, { status: 'error', error: 'OPENAI_API_KEY not configured on the server.' });
+    await setJob(supabase, jobId, { status: 'error', error: 'OPENAI_API_KEY not configured.', finished_at: new Date().toISOString() });
     return { statusCode: 202 };
   }
 
@@ -43,19 +61,18 @@ exports.handler = async (event) => {
   try {
     audioBuffer = Buffer.from(audio, 'base64');
   } catch {
-    await store.setJSON(jobId, { status: 'error', error: 'Audio could not be decoded' });
+    await setJob(supabase, jobId, { status: 'error', error: 'Audio could not be decoded', finished_at: new Date().toISOString() });
     return { statusCode: 202 };
   }
   if (audioBuffer.length < 100) {
-    await store.setJSON(jobId, { status: 'error', error: 'Audio too short' });
+    await setJob(supabase, jobId, { status: 'error', error: 'Audio too short', finished_at: new Date().toISOString() });
     return { statusCode: 202 };
   }
   if (audioBuffer.length > 25 * 1024 * 1024) {
-    await store.setJSON(jobId, { status: 'error', error: 'Audio too large (max 25MB)' });
+    await setJob(supabase, jobId, { status: 'error', error: 'Audio too large (max 25MB)', finished_at: new Date().toISOString() });
     return { statusCode: 202 };
   }
 
-  // Prime Whisper with the roster + tests so unusual surnames transcribe right.
   const promptParts = ['A youth sports coach calling out athlete names and test names during a performance testing session.'];
   if (namesHint && typeof namesHint === 'string' && namesHint.trim()) {
     promptParts.push(`Athletes may include: ${namesHint.slice(0, 600)}.`);
@@ -79,19 +96,18 @@ exports.handler = async (event) => {
       language: 'en',
       temperature: 0,
     });
-    await store.setJSON(jobId, {
+    await setJob(supabase, jobId, {
       status: 'done',
-      text: result.text || '',
-      finishedAt: new Date().toISOString(),
+      result: result.text || '',
+      finished_at: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Whisper failed:', err);
-    await store.setJSON(jobId, {
+    await setJob(supabase, jobId, {
       status: 'error',
       error: err.message || 'Transcription failed',
-      finishedAt: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
     });
   }
-  // Background functions return 202 regardless; the body is ignored by Netlify.
   return { statusCode: 202 };
 };
