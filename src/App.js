@@ -577,6 +577,7 @@ const MAX_RECORDING_MS = 60000; // safety cap
 function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestIds, onAddAthlete, onSelectTest, athletesById, testsById }) {
   const [phase, setPhase] = useState('idle'); // idle | recording | transcribing
   const [elapsed, setElapsed] = useState(0);
+  const [transcribeElapsed, setTranscribeElapsed] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [ambiguousNames, setAmbiguousNames] = useState([]);
@@ -586,6 +587,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
   const safetyTimerRef = useRef(null);
+  const transcribeTimerRef = useRef(null);
   const mimeRef = useRef('audio/webm');
 
   const cleanupMic = () => {
@@ -595,6 +597,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
+    if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
     recorderRef.current = null;
   };
 
@@ -619,20 +622,32 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     setFeedback({ athletes: aNames, tests: tNames });
   };
 
+  // Browser-native base64 via FileReader. Doesn't block the main thread, so the
+  // mic-button UI keeps animating instead of looking frozen on bigger clips.
+  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result || '';
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : '');
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read audio'));
+    reader.readAsDataURL(blob);
+  });
+
   const sendToWhisper = async (blob, mimeType) => {
     setPhase('transcribing');
+    setTranscribeElapsed(0);
+    const startedAt = Date.now();
+    if (transcribeTimerRef.current) clearInterval(transcribeTimerRef.current);
+    transcribeTimerRef.current = setInterval(() => setTranscribeElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    // Abort the fetch if the function takes longer than 30s — Netlify's own
+    // limit is 26s, but a network hang could outlast it; this keeps the UI
+    // from appearing locked up.
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 30000);
     try {
-      const arrayBuffer = await blob.arrayBuffer();
-      // Base64-encode the audio. For ~30s of audio this is well under 1MB.
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-      }
-      const audio = btoa(binary);
-      // Build bias hints from the roster + test list. Whisper's prompt cap is
-      // ~244 tokens, the server trims further but we keep the payload light.
+      const audio = await blobToBase64(blob);
       const namesHint = athletes
         .filter(a => (a.type || 'athlete') === entryMode && a.first_name)
         .slice(0, 80)
@@ -643,6 +658,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio, mimeType, namesHint, testsHint }),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const body = await res.text();
@@ -653,8 +669,14 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
       processText(text || '');
     } catch (err) {
       console.warn('Transcription error:', err);
-      setError(err.message || 'Transcription failed. Check your connection and try again.');
+      if (err && err.name === 'AbortError') {
+        setError('Transcription took too long. Try a shorter recording or check your connection.');
+      } else {
+        setError(err.message || 'Transcription failed. Check your connection and try again.');
+      }
     } finally {
+      clearTimeout(abortTimer);
+      if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
       setPhase('idle');
     }
   };
@@ -726,11 +748,11 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     else if (!isTranscribing) startRecording();
   };
 
-  const headline = isRecording ? `Recording… ${elapsed}s` : isTranscribing ? 'Transcribing…' : 'Voice Entry';
+  const headline = isRecording ? `Recording… ${elapsed}s` : isTranscribing ? `Transcribing… ${transcribeElapsed}s` : 'Voice Entry';
   const hint = isRecording
     ? `Talk through your roster and tests. Tap mic to stop.${elapsed > 45 ? ` Auto-stops at 60s.` : ''}`
     : isTranscribing
-      ? 'Sending audio to Whisper — about 2 seconds.'
+      ? 'Whisper is processing your audio. ~5–10 seconds is normal, longer for longer clips. Times out at 30s.'
       : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.';
 
   return (
