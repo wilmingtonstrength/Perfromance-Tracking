@@ -277,16 +277,28 @@ const _levenshtein = (a, b) => {
 };
 
 // Find athletes named in the transcript. Returns array of athlete IDs.
-// Scoring rules (highest match wins):
-//   pair hit: "first last" or "last first" appears -> add
-//   both first+last fuzzy hit separately -> add
-//   unique last name (>=4 chars) hit -> add (last names are more distinctive)
-//   unique first name hit -> add
-//   ambiguous first name hit without last-name confirmation -> SKIP (no guess)
-const findAthleteMatches = (transcript, athletes, filterType) => {
+// Find athletes named in the transcript. Returns { ids, ambiguous } where
+// `ambiguous` is the set of first names that hit but were skipped because
+// multiple kids share that first name and no last name was confirmed.
+//
+// Key rule: pair-adjacency (first+last next to each other) is ONLY checked
+// against the recognizer's TOP guess, NOT the multi-alternative pool. Multi-alt
+// alternates often contain different misheard last names ("Ryan Adams" in alt 1,
+// "Ryan Kraft" in alt 2), and a substring check against the pool would match
+// BOTH Ryans even though the coach only said one.
+//
+// For ambiguous first names (multiple kids share it), the only ways to match:
+//   1. first+last next to each other in the top guess, OR
+//   2. the last name alone (and it's unique in the roster) in the top guess.
+// Multi-alt rescue is allowed for unambiguous first names — there's no other
+// athlete to confuse with.
+const findAthleteMatches = (transcript, athletes, filterType, topTranscript) => {
   const norm = _normalize(transcript);
   const tokens = norm.split(' ').filter(Boolean);
-  if (tokens.length === 0) return [];
+  if (tokens.length === 0) return { ids: [], ambiguous: [] };
+  const normTop = _normalize(topTranscript || transcript);
+  const tokensTop = normTop.split(' ').filter(Boolean);
+
   const pool = athletes.filter(a => !filterType || (a.type || 'athlete') === filterType);
   const firstNameCounts = {};
   const lastNameCounts = {};
@@ -296,24 +308,48 @@ const findAthleteMatches = (transcript, athletes, filterType) => {
     if (fn) firstNameCounts[fn] = (firstNameCounts[fn] || 0) + 1;
     if (ln) lastNameCounts[ln] = (lastNameCounts[ln] || 0) + 1;
   });
-  const fuzzyTokenHit = (target, tol) => tokens.some(t => t.length >= 3 && _levenshtein(t, target) <= tol);
+
+  const tokMatch = (tok, target, tol) => tok === target || (tol > 0 && tok.length >= 3 && _levenshtein(tok, target) <= tol);
+  const hitInTokens = (toks, target, tol) => toks.some(t => tokMatch(t, target, tol));
+  const pairAdjacentIn = (toks, fn, ln, fnTol, lnTol) => {
+    if (!ln) return false;
+    for (let i = 0; i < toks.length - 1; i++) {
+      if (tokMatch(toks[i], fn, fnTol) && tokMatch(toks[i + 1], ln, lnTol)) return true;
+    }
+    return false;
+  };
+
   const out = new Set();
+  const ambiguous = new Set();
   pool.forEach(a => {
     const fn = _normalize(a.first_name);
     const ln = _normalize(a.last_name);
     if (!fn) return;
     const fnTol = fn.length >= 7 ? 2 : (fn.length >= 4 ? 1 : 0);
     const lnTol = ln && ln.length >= 7 ? 2 : (ln && ln.length >= 4 ? 1 : 0);
-    const fnHit = tokens.includes(fn) || (fnTol > 0 && fuzzyTokenHit(fn, fnTol));
-    const lnHit = ln && (tokens.includes(ln) || (lnTol > 0 && fuzzyTokenHit(ln, lnTol)));
-    const pairHit = ln && (norm.includes(fn + ' ' + ln) || norm.includes(ln + ' ' + fn));
-    if (pairHit) { out.add(a.id); return; }
-    if (fnHit && lnHit) { out.add(a.id); return; }
-    if (lnHit && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
-    if (fnHit && firstNameCounts[fn] === 1) { out.add(a.id); return; }
-    // ambiguous — skip rather than guess wrong
+
+    // Strongest signal: first+last adjacent in the recognizer's TOP guess.
+    if (pairAdjacentIn(tokensTop, fn, ln, fnTol, lnTol)) { out.add(a.id); return; }
+
+    // Ambiguous first name (multiple kids share it): require pair-in-top or
+    // a unique-last-name hit in the TOP guess. No multi-alt rescue here —
+    // that's what was causing both Ryans to get added.
+    if (firstNameCounts[fn] > 1) {
+      const lnHitTop = ln && hitInTokens(tokensTop, ln, lnTol);
+      if (lnHitTop && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
+      // Skip, but if the first name was at least heard, flag for the UI hint.
+      if (hitInTokens(tokens, fn, fnTol) || hitInTokens(tokensTop, fn, fnTol)) ambiguous.add(fn);
+      return;
+    }
+
+    // Unambiguous first name — looser rules, multi-alt rescue allowed.
+    const fnHitAll = hitInTokens(tokens, fn, fnTol);
+    const lnHitAll = ln && hitInTokens(tokens, ln, lnTol);
+    if (fnHitAll && lnHitAll) { out.add(a.id); return; }
+    if (lnHitAll && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
+    if (hitInTokens(tokensTop, fn, fnTol)) { out.add(a.id); return; }
   });
-  return Array.from(out);
+  return { ids: Array.from(out), ambiguous: Array.from(ambiguous) };
 };
 
 // Find tests named in the transcript. Returns array of test IDs.
@@ -534,6 +570,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [ambiguousNames, setAmbiguousNames] = useState([]); // first names heard but skipped due to collisions
   const recRef = useRef(null);
   const silenceRef = useRef(null);
   const seenAthletesRef = useRef(new Set());
@@ -551,15 +588,18 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     silenceRef.current = setTimeout(() => { stop(); }, 5000);
   };
 
-  const processTranscript = (text) => {
-    if (!text || !text.trim()) return;
-    const aMatches = findAthleteMatches(text, athletes, entryMode).filter(id => !seenAthletesRef.current.has(id));
+  const processTranscript = (matchText, topText) => {
+    if (!matchText || !matchText.trim()) return;
+    const aResult = findAthleteMatches(matchText, athletes, entryMode, topText);
+    const aMatches = aResult.ids.filter(id => !seenAthletesRef.current.has(id));
     aMatches.forEach(id => {
       seenAthletesRef.current.add(id);
       onAddAthlete(id);
       addedRef.current.athletes.push(id);
     });
-    const tMatches = findTestMatches(text, testList).filter(id => !seenTestsRef.current.has(id));
+    // Update ambiguous-first-name hint each pass (clears once disambiguated).
+    setAmbiguousNames(aResult.ambiguous);
+    const tMatches = findTestMatches(matchText, testList).filter(id => !seenTestsRef.current.has(id));
     tMatches.forEach(id => {
       seenTestsRef.current.add(id);
       onSelectTest(id);
@@ -582,6 +622,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     addedRef.current = { athletes: [], tests: [] };
     setTranscript('');
     setFeedback(null);
+    setAmbiguousNames([]);
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
@@ -608,7 +649,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
       const display = (accumDisplay + ' ' + interimDisplay).trim();
       const matchText = (accumMatch + ' ' + interimMatch).trim();
       setTranscript(display);
-      processTranscript(matchText);
+      processTranscript(matchText, display);
       resetSilence();
     };
     rec.onerror = (e) => {
@@ -657,13 +698,18 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
           </div>
         </div>
       </div>
-      {(transcript || feedback) && (
+      {(transcript || feedback || ambiguousNames.length > 0) && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          {transcript && <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic', marginBottom: feedback ? 8 : 0 }}>"{transcript}"</div>}
+          {transcript && <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic', marginBottom: (feedback || ambiguousNames.length > 0) ? 8 : 0 }}>"{transcript}"</div>}
           {feedback && (
             <div style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
               {feedback.athletes.length > 0 && <span style={{ color: '#00ff88' }}>Added: <strong>{feedback.athletes.join(', ')}</strong></span>}
               {feedback.tests.length > 0 && <span style={{ color: '#00d4ff' }}>Tests: <strong>{feedback.tests.join(', ')}</strong></span>}
+            </div>
+          )}
+          {ambiguousNames.length > 0 && (
+            <div style={{ fontSize: 13, color: '#FFA500', marginTop: feedback ? 6 : 0 }}>
+              Heard <strong>{ambiguousNames.map(n => n.charAt(0).toUpperCase() + n.slice(1)).join(', ')}</strong> — say a last name to pick the right one.
             </div>
           )}
         </div>
