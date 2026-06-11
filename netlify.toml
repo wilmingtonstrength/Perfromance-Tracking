@@ -5,6 +5,10 @@
 
 [functions]
   node_bundler = "esbuild"
+  # Leave @netlify/blobs unbundled so the Netlify runtime can inject site
+  # context automatically; bundling it via esbuild breaks auto-config and
+  # causes 'environment has not been configured to use Netlify Blobs' errors.
+  external_node_modules = ["@netlify/blobs"]
 
 # Transcription runs as a Background Function (transcribe-background) so it
 # isn't held to the synchronous proxy's ~10s upstream HTTP timeout. The status
