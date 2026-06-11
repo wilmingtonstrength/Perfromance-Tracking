@@ -721,40 +721,27 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
 
 /* ===================== TEST ENTRY PAGE ===================== */
 function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
-  // Persist Test Entry state across navigation. Prevents accidental nav taps from
-  // wiping the roster mid-session. Cleared explicitly via the Clear button or on submit.
-  const STORAGE_KEY = 'ws_testentry_state_v1';
-  // Read localStorage ONCE on mount via useState's lazy initializer trick.
-  const [saved] = useState(() => {
-    try {
-      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  });
-  const [testDate, setTestDate] = useState(() => (saved && saved.testDate) || new Date().toISOString().split('T')[0]);
-  const [selectedTests, setSelectedTests] = useState(() => (saved && Array.isArray(saved.selectedTests)) ? saved.selectedTests : []);
-  const [useKg, setUseKg] = useState(() => (saved && typeof saved.useKg === 'boolean') ? saved.useKg : false);
-  const [athleteRows, setAthleteRows] = useState(() => (saved && Array.isArray(saved.athleteRows)) ? saved.athleteRows : []);
+  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedTests, setSelectedTests] = useState([]);
+  const [useKg, setUseKg] = useState(false);
+  const [athleteRows, setAthleteRows] = useState([]);
   const [submittedResults, setSubmittedResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [entryMode, setEntryMode] = useState(() => (saved && saved.entryMode) || 'athlete');
+  const [entryMode, setEntryMode] = useState('athlete');
 
-  // Autosave to localStorage whenever any persisted slice changes.
+  // One-time cleanup of the old persistence key for users upgrading from the
+  // previous build. Safe no-op if the key isn't there.
   useEffect(() => {
-    try {
-      const payload = { testDate, entryMode, selectedTests, useKg, athleteRows };
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch {}
-  }, [testDate, entryMode, selectedTests, useKg, athleteRows]);
+    try { window.localStorage.removeItem('ws_testentry_state_v1'); } catch {}
+  }, []);
 
   const clearAll = () => {
     if (athleteRows.length === 0 && selectedTests.length === 0) return;
-    if (!window.confirm('Clear all selected tests and athletes? This wipes the current session entry.')) return;
+    if (!window.confirm('Clear all selected tests and athletes?')) return;
     setSelectedTests([]);
     setAthleteRows([]);
     setUseKg(false);
-    try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
   };
 
   const testSet = getTestsForType(entryMode);
