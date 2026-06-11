@@ -254,7 +254,9 @@ function SimpleChart({ data, direction, testDef, onPointClick }) {
 }
 
 /* ===================== VOICE INPUT HELPERS ===================== */
-const SR_AVAILABLE = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+// Voice entry needs the MediaRecorder API (universal modern browser support)
+// plus getUserMedia (HTTPS-only). Whisper handles the recognition server-side.
+const VOICE_AVAILABLE = typeof window !== 'undefined' && !!window.MediaRecorder && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
 const _normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 const _digitWords = { '0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine','10':'ten' };
@@ -565,143 +567,200 @@ export default function App() {
   );
 }
 
-/* ===================== VOICE CAPTURE (Test Entry helper) ===================== */
+/* ===================== VOICE CAPTURE (Whisper-backed) ===================== */
+// Records mic audio via MediaRecorder, posts it to the /transcribe Netlify
+// Function which calls OpenAI Whisper. Whisper is much more accurate than the
+// browser's built-in SpeechRecognition for unusual names, and we bias it by
+// passing the roster as a prompt — so "Kraft", "Mears", "Caffee" actually
+// transcribe correctly.
+const MAX_RECORDING_MS = 60000; // safety cap
 function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestIds, onAddAthlete, onSelectTest, athletesById, testsById }) {
-  const [listening, setListening] = useState(false);
+  const [phase, setPhase] = useState('idle'); // idle | recording | transcribing
+  const [elapsed, setElapsed] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [feedback, setFeedback] = useState(null);
-  const [ambiguousNames, setAmbiguousNames] = useState([]); // first names heard but skipped due to collisions
-  const recRef = useRef(null);
-  const silenceRef = useRef(null);
-  const seenAthletesRef = useRef(new Set());
-  const seenTestsRef = useRef(new Set());
-  const addedRef = useRef({ athletes: [], tests: [] });
+  const [ambiguousNames, setAmbiguousNames] = useState([]);
+  const [error, setError] = useState(null);
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const safetyTimerRef = useRef(null);
+  const mimeRef = useRef('audio/webm');
 
-  const stop = () => {
-    if (recRef.current) { try { recRef.current.stop(); } catch {} recRef.current = null; }
-    if (silenceRef.current) { clearTimeout(silenceRef.current); silenceRef.current = null; }
-    setListening(false);
+  const cleanupMic = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch {} });
+      streamRef.current = null;
+    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
+    recorderRef.current = null;
   };
 
-  const resetSilence = () => {
-    if (silenceRef.current) clearTimeout(silenceRef.current);
-    silenceRef.current = setTimeout(() => { stop(); }, 5000);
-  };
-
-  const processTranscript = (matchText, topText) => {
-    if (!matchText || !matchText.trim()) return;
-    const aResult = findAthleteMatches(matchText, athletes, entryMode, topText);
-    const aMatches = aResult.ids.filter(id => !seenAthletesRef.current.has(id));
-    aMatches.forEach(id => {
-      seenAthletesRef.current.add(id);
-      onAddAthlete(id);
-      addedRef.current.athletes.push(id);
-    });
-    // Update ambiguous-first-name hint each pass (clears once disambiguated).
+  const processText = (text) => {
+    if (!text || !text.trim()) {
+      setError('Did not catch anything. Try again closer to the mic.');
+      return;
+    }
+    // Pre-seed seen sets so we don't try to re-add athletes/tests already on screen.
+    const seenAthletes = new Set(rosterIds || []);
+    const seenTests = new Set(selectedTestIds || []);
+    // Whisper returns one clean transcript — pass it as both args for the matcher's
+    // top-vs-pool logic (no multi-alternative noise to disambiguate).
+    const aResult = findAthleteMatches(text, athletes, entryMode, text);
+    const newAthletes = aResult.ids.filter(id => !seenAthletes.has(id));
+    newAthletes.forEach(id => onAddAthlete(id));
     setAmbiguousNames(aResult.ambiguous);
-    const tMatches = findTestMatches(matchText, testList).filter(id => !seenTestsRef.current.has(id));
-    tMatches.forEach(id => {
-      seenTestsRef.current.add(id);
-      onSelectTest(id);
-      addedRef.current.tests.push(id);
-    });
-    if (aMatches.length || tMatches.length) {
-      const aNames = addedRef.current.athletes.map(id => { const a = athletesById(id); return a ? a.first_name : id; });
-      const tNames = addedRef.current.tests.map(id => { const t = testsById(id); return t ? t.name : id; });
-      setFeedback({ athletes: aNames, tests: tNames });
+    const newTests = findTestMatches(text, testList).filter(id => !seenTests.has(id));
+    newTests.forEach(id => onSelectTest(id));
+    const aNames = newAthletes.map(id => { const a = athletesById(id); return a ? `${a.first_name} ${a.last_name || ''}`.trim() : id; });
+    const tNames = newTests.map(id => { const t = testsById(id); return t ? t.name : id; });
+    setFeedback({ athletes: aNames, tests: tNames });
+  };
+
+  const sendToWhisper = async (blob, mimeType) => {
+    setPhase('transcribing');
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      // Base64-encode the audio. For ~30s of audio this is well under 1MB.
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      const audio = btoa(binary);
+      // Build bias hints from the roster + test list. Whisper's prompt cap is
+      // ~244 tokens, the server trims further but we keep the payload light.
+      const namesHint = athletes
+        .filter(a => (a.type || 'athlete') === entryMode && a.first_name)
+        .slice(0, 80)
+        .map(a => `${a.first_name} ${a.last_name || ''}`.trim())
+        .join(', ');
+      const testsHint = (testList || []).map(t => t.name).slice(0, 30).join(', ');
+      const res = await fetch('/.netlify/functions/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio, mimeType, namesHint, testsHint }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Transcription failed (${res.status}). ${body.slice(0, 200)}`);
+      }
+      const { text } = await res.json();
+      setTranscript(text || '');
+      processText(text || '');
+    } catch (err) {
+      console.warn('Transcription error:', err);
+      setError(err.message || 'Transcription failed. Check your connection and try again.');
+    } finally {
+      setPhase('idle');
     }
   };
 
-  const start = () => {
-    if (listening) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    // Pre-seed seen sets with already-on-screen items so we don't try to re-add them.
-    seenAthletesRef.current = new Set(rosterIds || []);
-    seenTestsRef.current = new Set(selectedTestIds || []);
-    addedRef.current = { athletes: [], tests: [] };
+  const startRecording = async () => {
+    setError(null);
     setTranscript('');
     setFeedback(null);
     setAmbiguousNames([]);
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.maxAlternatives = 3; // ask for top-3 candidates per phrase to recover tricky names
-    rec.lang = 'en-US';
-    let accumDisplay = ''; // best-guess only, for the visible transcript
-    let accumMatch = '';   // all alternatives concatenated, fed to the matcher
-    rec.onresult = (e) => {
-      let interimDisplay = '';
-      let interimMatch = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) {
-          accumDisplay += ' ' + r[0].transcript;
-          // Pool all alternatives so an unusual surname can still match even when
-          // the recognizer's top guess is something else entirely.
-          const altCount = Math.min(r.length || 1, 3);
-          for (let j = 0; j < altCount; j++) accumMatch += ' ' + r[j].transcript;
-        } else {
-          interimDisplay += r[0].transcript;
-          interimMatch += r[0].transcript;
-        }
-      }
-      const display = (accumDisplay + ' ' + interimDisplay).trim();
-      const matchText = (accumMatch + ' ' + interimMatch).trim();
-      setTranscript(display);
-      processTranscript(matchText, display);
-      resetSilence();
-    };
-    rec.onerror = (e) => {
-      if (e.error !== 'no-speech' && e.error !== 'aborted') stop();
-    };
-    rec.onend = () => {
-      // Browser may end recognition on its own (especially iOS). User can tap to resume.
-      if (silenceRef.current) { clearTimeout(silenceRef.current); silenceRef.current = null; }
-      recRef.current = null;
-      setListening(false);
-    };
+    if (typeof window === 'undefined' || !navigator.mediaDevices || !window.MediaRecorder) {
+      setError('Voice recording is not supported in this browser.');
+      return;
+    }
     try {
-      rec.start();
-      recRef.current = rec;
-      setListening(true);
-      resetSilence();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      // Prefer webm/opus where available (Chrome/Firefox/Android). Safari produces mp4.
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', ''];
+      const supported = candidates.find(t => !t || (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(t)));
+      const mimeType = supported || '';
+      mimeRef.current = mimeType || 'audio/webm';
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: mimeRef.current });
+        cleanupMic();
+        await sendToWhisper(blob, mimeRef.current);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      const startedAt = Date.now();
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
+      safetyTimerRef.current = setTimeout(() => { stopRecording(); }, MAX_RECORDING_MS);
+      setPhase('recording');
     } catch (err) {
-      console.warn('Voice start failed:', err);
+      console.warn('getUserMedia failed:', err);
+      setError(err && err.name === 'NotAllowedError' ? 'Microphone permission was denied.' : 'Could not access the microphone.');
+      cleanupMic();
     }
   };
 
-  useEffect(() => () => stop(), []); // cleanup on unmount
+  const stopRecording = () => {
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      try { recorderRef.current.stop(); } catch {}
+    } else {
+      cleanupMic();
+      setPhase('idle');
+    }
+  };
+
+  useEffect(() => () => cleanupMic(), []); // cleanup on unmount
+
+  const isRecording = phase === 'recording';
+  const isTranscribing = phase === 'transcribing';
+  const isBusy = isRecording || isTranscribing;
+  const accent = isRecording ? '#ff8a8a' : isTranscribing ? '#FFA500' : '#00d4ff';
+  const accentBg = isRecording
+    ? 'linear-gradient(135deg, #ff4d4d 0%, #cc0000 100%)'
+    : isTranscribing
+      ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)'
+      : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)';
+  const cardBg = isRecording ? 'rgba(255,80,80,0.08)' : isTranscribing ? 'rgba(255,165,0,0.08)' : 'rgba(0,212,255,0.05)';
+  const cardBorder = isRecording ? 'rgba(255,80,80,0.35)' : isTranscribing ? 'rgba(255,165,0,0.35)' : 'rgba(0,212,255,0.2)';
+
+  const handleClick = () => {
+    if (isRecording) stopRecording();
+    else if (!isTranscribing) startRecording();
+  };
+
+  const headline = isRecording ? `Recording… ${elapsed}s` : isTranscribing ? 'Transcribing…' : 'Voice Entry';
+  const hint = isRecording
+    ? `Talk through your roster and tests. Tap mic to stop.${elapsed > 45 ? ` Auto-stops at 60s.` : ''}`
+    : isTranscribing
+      ? 'Sending audio to Whisper — about 2 seconds.'
+      : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.';
 
   return (
-    <div style={{ background: listening ? 'rgba(255,80,80,0.08)' : 'rgba(0,212,255,0.05)', borderRadius: 12, padding: 16, marginBottom: 20, border: `1px solid ${listening ? 'rgba(255,80,80,0.35)' : 'rgba(0,212,255,0.2)'}` }}>
+    <div style={{ background: cardBg, borderRadius: 12, padding: 16, marginBottom: 20, border: `1px solid ${cardBorder}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <button
-          onClick={listening ? stop : start}
+          onClick={handleClick}
+          disabled={isTranscribing}
           style={{
             width: 64, height: 64, borderRadius: '50%',
-            background: listening ? 'linear-gradient(135deg, #ff4d4d 0%, #cc0000 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)',
-            border: 'none', cursor: 'pointer', fontSize: 28, color: '#0a1628', fontWeight: 700, lineHeight: 1,
-            boxShadow: listening ? '0 0 0 6px rgba(255,77,77,0.25)' : '0 4px 16px rgba(0,212,255,0.3)',
-            animation: listening ? 'wsMicPulse 1s infinite' : 'none'
+            background: accentBg,
+            border: 'none', cursor: isTranscribing ? 'wait' : 'pointer', fontSize: 28, color: '#0a1628', fontWeight: 700, lineHeight: 1,
+            boxShadow: isRecording ? '0 0 0 6px rgba(255,77,77,0.25)' : '0 4px 16px rgba(0,212,255,0.3)',
+            animation: isRecording ? 'wsMicPulse 1s infinite' : 'none',
+            opacity: isTranscribing ? 0.7 : 1,
           }}
-          aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+          aria-label={isRecording ? 'Stop recording' : 'Start voice entry'}
         >🎤</button>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: listening ? '#ff8a8a' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>
-            {listening ? 'Listening…' : 'Voice Entry'}
+          <div style={{ fontWeight: 700, fontSize: 14, color: accent, textTransform: 'uppercase', letterSpacing: 2 }}>
+            {headline}
           </div>
-          <div style={{ fontSize: 12, color: '#888', marginTop: 6, lineHeight: 1.4 }}>
-            {listening
-              ? 'Say names ("Cameron, Becca, Josiah") and tests ("max velocity, five-ten fly"). Auto-stops after 5s of silence. Tap mic to stop.'
-              : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.'}
-          </div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: 6, lineHeight: 1.4 }}>{hint}</div>
         </div>
       </div>
-      {(transcript || feedback || ambiguousNames.length > 0) && (
+      {(transcript || feedback || ambiguousNames.length > 0 || error) && !isBusy && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          {error && <div style={{ fontSize: 13, color: '#ff8a8a', marginBottom: (transcript || feedback) ? 8 : 0 }}>{error}</div>}
           {transcript && <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic', marginBottom: (feedback || ambiguousNames.length > 0) ? 8 : 0 }}>"{transcript}"</div>}
-          {feedback && (
+          {feedback && (feedback.athletes.length > 0 || feedback.tests.length > 0) && (
             <div style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
               {feedback.athletes.length > 0 && <span style={{ color: '#00ff88' }}>Added: <strong>{feedback.athletes.join(', ')}</strong></span>}
               {feedback.tests.length > 0 && <span style={{ color: '#00d4ff' }}>Tests: <strong>{feedback.tests.join(', ')}</strong></span>}
@@ -854,7 +913,7 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
         )}
       </div>
       <div style={{ height: 24 }} />
-      {SR_AVAILABLE && (
+      {VOICE_AVAILABLE && (
         <VoiceCapture
           athletes={athletes}
           testList={flatTestList}
