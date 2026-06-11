@@ -6,7 +6,6 @@
 [functions]
   node_bundler = "esbuild"
 
-[functions.transcribe]
-  # Whisper API can take a few seconds; bump the function timeout from the
-  # default 10s to 26s (Netlify's max for a synchronous function).
-  timeout = 26
+# Transcription runs as a Background Function (transcribe-background) so it
+# isn't held to the synchronous proxy's ~10s upstream HTTP timeout. The status
+# endpoint (transcribe-status) is a fast plain function.

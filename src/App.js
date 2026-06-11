@@ -635,17 +635,32 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     reader.readAsDataURL(blob);
   });
 
+  // Generate a UUID for the transcription job. crypto.randomUUID is available
+  // on all browsers we care about (Chrome 92+, Safari 15.4+); fallback uses
+  // Math.random which is fine for a one-shot job id.
+  const newJobId = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : 'job-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+
+  const pollJob = async (jobId, deadline) => {
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      const res = await fetch(`/.netlify/functions/transcribe-status?id=${encodeURIComponent(jobId)}`);
+      if (!res.ok) throw new Error(`Status check failed (${res.status})`);
+      const data = await res.json();
+      if (data.status === 'done') return data.text || '';
+      if (data.status === 'error') throw new Error(data.error || 'Transcription failed');
+      // else: still pending, loop
+    }
+    throw new Error('Transcription timed out after 90s. Try a shorter recording.');
+  };
+
   const sendToWhisper = async (blob, mimeType) => {
     setPhase('transcribing');
     setTranscribeElapsed(0);
     const startedAt = Date.now();
     if (transcribeTimerRef.current) clearInterval(transcribeTimerRef.current);
     transcribeTimerRef.current = setInterval(() => setTranscribeElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
-    // Abort the fetch if the function takes longer than 30s — Netlify's own
-    // limit is 26s, but a network hang could outlast it; this keeps the UI
-    // from appearing locked up.
-    const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), 30000);
     try {
       const audio = await blobToBase64(blob);
       const namesHint = athletes
@@ -654,28 +669,25 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
         .map(a => `${a.first_name} ${a.last_name || ''}`.trim())
         .join(', ');
       const testsHint = (testList || []).map(t => t.name).slice(0, 30).join(', ');
-      const res = await fetch('/.netlify/functions/transcribe', {
+      const jobId = newJobId();
+      // Kick off the background job — returns 202 immediately, no proxy timeout.
+      const kickoff = await fetch('/.netlify/functions/transcribe-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio, mimeType, namesHint, testsHint }),
-        signal: controller.signal,
+        body: JSON.stringify({ jobId, audio, mimeType, namesHint, testsHint }),
       });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Transcription failed (${res.status}). ${body.slice(0, 200)}`);
+      if (kickoff.status !== 202 && !kickoff.ok) {
+        const body = await kickoff.text();
+        throw new Error(`Could not start transcription (${kickoff.status}). ${body.slice(0, 200)}`);
       }
-      const { text } = await res.json();
-      setTranscript(text || '');
-      processText(text || '');
+      // Poll the status endpoint until done or 90s elapses.
+      const text = await pollJob(jobId, Date.now() + 90000);
+      setTranscript(text);
+      processText(text);
     } catch (err) {
       console.warn('Transcription error:', err);
-      if (err && err.name === 'AbortError') {
-        setError('Transcription took too long. Try a shorter recording or check your connection.');
-      } else {
-        setError(err.message || 'Transcription failed. Check your connection and try again.');
-      }
+      setError(err.message || 'Transcription failed. Check your connection and try again.');
     } finally {
-      clearTimeout(abortTimer);
       if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
       setPhase('idle');
     }
@@ -752,7 +764,7 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
   const hint = isRecording
     ? `Talk through your roster and tests. Tap mic to stop.${elapsed > 45 ? ` Auto-stops at 60s.` : ''}`
     : isTranscribing
-      ? 'Whisper is processing your audio. ~5–10 seconds is normal, longer for longer clips. Times out at 30s.'
+      ? 'Whisper is processing your audio. ~5–10 seconds is normal for short clips, up to ~30s for a full 60s recording.'
       : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.';
 
   return (
