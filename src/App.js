@@ -622,19 +622,6 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     setFeedback({ athletes: aNames, tests: tNames });
   };
 
-  // Browser-native base64 via FileReader. Doesn't block the main thread, so the
-  // mic-button UI keeps animating instead of looking frozen on bigger clips.
-  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result || '';
-      const comma = result.indexOf(',');
-      resolve(comma >= 0 ? result.slice(comma + 1) : '');
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read audio'));
-    reader.readAsDataURL(blob);
-  });
-
   // Generate a UUID for the transcription job. crypto.randomUUID is available
   // on all browsers we care about (Chrome 92+, Safari 15.4+); fallback uses
   // Math.random which is fine for a one-shot job id.
@@ -662,25 +649,38 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
     if (transcribeTimerRef.current) clearInterval(transcribeTimerRef.current);
     transcribeTimerRef.current = setInterval(() => setTranscribeElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
     try {
-      const audio = await blobToBase64(blob);
+      const jobId = newJobId();
+      // Step 1: upload the audio blob straight to Supabase Storage. We can't
+      // ship the audio in the Netlify function payload — async Lambda
+      // invocations cap at 256KB, smaller than a typical recording.
+      const extension = (mimeType || '').includes('mp4') ? 'mp4'
+        : (mimeType || '').includes('ogg') ? 'ogg'
+        : 'webm';
+      const audioPath = `${jobId}.${extension}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('voice-audio')
+        .upload(audioPath, blob, { contentType: mimeType || `audio/${extension}`, upsert: true });
+      if (uploadErr) throw new Error(`Audio upload failed: ${uploadErr.message}`);
+
       const namesHint = athletes
         .filter(a => (a.type || 'athlete') === entryMode && a.first_name)
         .slice(0, 80)
         .map(a => `${a.first_name} ${a.last_name || ''}`.trim())
         .join(', ');
       const testsHint = (testList || []).map(t => t.name).slice(0, 30).join(', ');
-      const jobId = newJobId();
-      // Kick off the background job — returns 202 immediately, no proxy timeout.
+
+      // Step 2: kick off the background job. Payload is tiny now — just IDs
+      // and hints. Function downloads the audio from Storage server-side.
       const kickoff = await fetch('/.netlify/functions/transcribe-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, audio, mimeType, namesHint, testsHint }),
+        body: JSON.stringify({ jobId, audioPath, mimeType, namesHint, testsHint }),
       });
       if (kickoff.status !== 202 && !kickoff.ok) {
         const body = await kickoff.text();
         throw new Error(`Could not start transcription (${kickoff.status}). ${body.slice(0, 200)}`);
       }
-      // Poll the status endpoint until done or 90s elapses.
+      // Step 3: poll until done. Function deletes the storage object when done.
       const text = await pollJob(jobId, Date.now() + 90000);
       setTranscript(text);
       processText(text);

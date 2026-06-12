@@ -1,10 +1,13 @@
 // Background Whisper transcription. The `-background` suffix tells Netlify to
 // invoke this asynchronously: the HTTP request returns 202 immediately so the
 // client never sits waiting on a synchronous proxy that has its own ~10s
-// inactivity timeout (which was producing the 504 the coach was seeing).
+// inactivity timeout.
 //
-// Result is stored in the Supabase transcription_jobs table; the client polls
-// `/.netlify/functions/transcribe-status?id=<job_id>` until done.
+// The audio itself is NOT in the request body — that would exceed the AWS
+// Lambda async-invocation 256KB cap and 500 before our code runs. Instead the
+// client uploads the audio blob directly to Supabase Storage (bucket
+// 'voice-audio') and only sends us the path. We download it, send to Whisper,
+// then delete the file.
 
 const { OpenAI, toFile } = require('openai');
 const { createClient } = require('@supabase/supabase-js');
@@ -17,7 +20,6 @@ const getSupabase = () => {
 };
 
 const setJob = async (supabase, jobId, fields) => {
-  // upsert so 'pending' insert + later 'done' update both use the same call.
   const row = { id: jobId, ...fields };
   await supabase.from('transcription_jobs').upsert(row, { onConflict: 'id' });
 };
@@ -34,17 +36,16 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  const { jobId, audio, mimeType, namesHint, testsHint } = payload;
+  const { jobId, audioPath, mimeType, namesHint, testsHint } = payload;
   if (!jobId || typeof jobId !== 'string') {
     return { statusCode: 400, body: 'Missing jobId' };
   }
-  if (!audio || typeof audio !== 'string') {
-    return { statusCode: 400, body: 'Missing audio' };
+  if (!audioPath || typeof audioPath !== 'string') {
+    return { statusCode: 400, body: 'Missing audioPath' };
   }
 
   const supabase = getSupabase();
   if (!supabase) {
-    // No DB to write to — can't even record the error.
     console.error('Supabase env vars not set');
     return { statusCode: 202 };
   }
@@ -57,19 +58,32 @@ exports.handler = async (event) => {
     return { statusCode: 202 };
   }
 
+  // Always try to clean the storage object up, even on error.
+  const cleanupStorage = async () => {
+    try { await supabase.storage.from('voice-audio').remove([audioPath]); } catch (e) { console.warn('storage cleanup failed', e); }
+  };
+
   let audioBuffer;
   try {
-    audioBuffer = Buffer.from(audio, 'base64');
-  } catch {
-    await setJob(supabase, jobId, { status: 'error', error: 'Audio could not be decoded', finished_at: new Date().toISOString() });
+    const { data, error } = await supabase.storage.from('voice-audio').download(audioPath);
+    if (error || !data) throw new Error(error ? error.message : 'audio download returned no data');
+    const arrayBuffer = await data.arrayBuffer();
+    audioBuffer = Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.error('Storage download failed:', err);
+    await setJob(supabase, jobId, { status: 'error', error: `Could not load audio: ${err.message}`, finished_at: new Date().toISOString() });
+    await cleanupStorage();
     return { statusCode: 202 };
   }
+
   if (audioBuffer.length < 100) {
     await setJob(supabase, jobId, { status: 'error', error: 'Audio too short', finished_at: new Date().toISOString() });
+    await cleanupStorage();
     return { statusCode: 202 };
   }
   if (audioBuffer.length > 25 * 1024 * 1024) {
     await setJob(supabase, jobId, { status: 'error', error: 'Audio too large (max 25MB)', finished_at: new Date().toISOString() });
+    await cleanupStorage();
     return { statusCode: 202 };
   }
 
@@ -109,5 +123,6 @@ exports.handler = async (event) => {
       finished_at: new Date().toISOString(),
     });
   }
+  await cleanupStorage();
   return { statusCode: 202 };
 };
