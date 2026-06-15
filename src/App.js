@@ -1355,6 +1355,11 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
   const [filterAthlete, setFilterAthlete] = useState(null);
   const [explorerTest, setExplorerTest] = useState('');
   const [explorerGender, setExplorerGender] = useState('all');
+  const [explorerAgeMin, setExplorerAgeMin] = useState(''); const [explorerAgeMax, setExplorerAgeMax] = useState('');
+  const agePresets = [['all', 'All'], ['10u', '10U'], ['12u', '12U'], ['14u', '14U'], ['15p', '15+']];
+  const agePresetBounds = { all: ['', ''], '10u': ['', '10'], '12u': ['', '12'], '14u': ['', '14'], '15p': ['15', ''] };
+  const applyAgePreset = (v) => { const [lo, hi] = agePresetBounds[v]; setExplorerAgeMin(lo); setExplorerAgeMax(hi); };
+  const agePresetActive = (v) => { const [lo, hi] = agePresetBounds[v]; return explorerAgeMin === lo && explorerAgeMax === hi; };
 
   const now = new Date(); const cutoff = new Date(now);
   if (timeFrame === 'week') cutoff.setDate(cutoff.getDate() - 7);
@@ -1377,6 +1382,12 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
         const g = (a.gender || '').toLowerCase();
         if (explorerGender === 'female' && g !== 'female') return;
         if (explorerGender === 'male' && g === 'female') return;
+      }
+      if (explorerAgeMin !== '' || explorerAgeMax !== '') {
+        const age = calculateAge(a.birthday);
+        if (age == null || isNaN(age)) return;
+        if (explorerAgeMin !== '' && age < parseInt(explorerAgeMin, 10)) return;
+        if (explorerAgeMax !== '' && age > parseInt(explorerAgeMax, 10)) return;
       }
       const key = r.athlete_id;
       if (!prMap[key]) {
@@ -1417,7 +1428,7 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
 
       {view === 'explorer' && (
         <div>
-          <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 20 }}>Select a test to see every athlete's personal best, ranked from top to bottom. Filter by gender to compare within groups.</p>
+          <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 20 }}>Select a test to see every athlete's personal best, ranked from top to bottom. Filter by gender and age to compare within groups.</p>
           <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
             <div style={{ flex: '1 1 260px' }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Test</label>
@@ -1432,6 +1443,17 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
                 {[['all', 'All'], ['male', 'Boys'], ['female', 'Girls']].map(([v, l]) => (
                   <button key={v} onClick={() => setExplorerGender(v)} style={{ padding: '10px 16px', background: explorerGender === v ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: explorerGender === v ? '2px solid #00d4ff' : '2px solid transparent', color: explorerGender === v ? '#00d4ff' : '#666', fontWeight: explorerGender === v ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>{l}</button>
                 ))}
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Age</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  {agePresets.map(([v, l]) => { const active = agePresetActive(v); return (<button key={v} onClick={() => applyAgePreset(v)} style={{ padding: '10px 14px', background: active ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: active ? '2px solid #00d4ff' : '2px solid transparent', color: active ? '#00d4ff' : '#666', fontWeight: active ? 700 : 400, cursor: 'pointer', fontSize: 13 }}>{l}</button>); })}
+                </div>
+                <input type="number" min="0" placeholder="Min" value={explorerAgeMin} onChange={(e) => setExplorerAgeMin(e.target.value)} onWheel={(e) => e.currentTarget.blur()} style={{ width: 60, padding: '9px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 14 }} />
+                <span style={{ color: '#666' }}>–</span>
+                <input type="number" min="0" placeholder="Max" value={explorerAgeMax} onChange={(e) => setExplorerAgeMax(e.target.value)} onWheel={(e) => e.currentTarget.blur()} style={{ width: 60, padding: '9px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 14 }} />
               </div>
             </div>
             {explorerTest && <div style={{ padding: '10px 16px', background: 'rgba(0,212,255,0.1)', borderRadius: 8, color: '#00d4ff', fontWeight: 700, fontSize: 14 }}>{explorerResults.length} athletes</div>}
