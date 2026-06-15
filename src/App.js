@@ -223,6 +223,22 @@ function RowTimeInput({ value, onChange }) {
 }
 
 /* ===================== SIMPLE CHART ===================== */
+// Catmull-Rom -> cubic bezier so the line reads as a smooth curve instead of jagged segments
+function smoothLinePath(pts) {
+  if (!pts || pts.length === 0) return '';
+  if (pts.length === 1) return 'M ' + pts[0].x + ' ' + pts[0].y;
+  if (pts.length === 2) return 'M ' + pts[0].x + ' ' + pts[0].y + ' L ' + pts[1].x + ' ' + pts[1].y;
+  const t = 0.16; // tension: low = gentle smoothing, no overshoot
+  let d = 'M ' + pts[0].x + ' ' + pts[0].y;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i]; const p1 = pts[i]; const p2 = pts[i + 1]; const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) * t; const c1y = p1.y + (p2.y - p0.y) * t;
+    const c2x = p2.x - (p3.x - p1.x) * t; const c2y = p2.y - (p3.y - p1.y) * t;
+    d += ' C ' + c1x + ' ' + c1y + ' ' + c2x + ' ' + c2y + ' ' + p2.x + ' ' + p2.y;
+  }
+  return d;
+}
+
 function SimpleChart({ data, direction, testDef, onPointClick }) {
   if (!data || data.length === 0) return null;
   const values = data.map(d => d.value); const minVal = Math.min(...values); const maxVal = Math.max(...values);
@@ -236,18 +252,34 @@ function SimpleChart({ data, direction, testDef, onPointClick }) {
   const pointSpacing = data.length > 1 ? width / (data.length - 1) : width / 2;
   const getY = (val) => height - ((val - chartMin) / chartRange) * height;
   const points = data.map((d, i) => ({ x: data.length === 1 ? width / 2 : i * pointSpacing, y: getY(d.value), ...d }));
-  const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y).join(' ');
+  const linePath = smoothLinePath(points);
+  const areaPath = points.length > 1 ? linePath + ' L ' + points[points.length - 1].x + ' ' + height + ' L ' + points[0].x + ' ' + height + ' Z' : '';
   const bestValue = direction === 'lower' ? minVal : maxVal;
   const formatVal = (v) => testDef ? formatTestValueByDef(testDef, v) : v;
   const formatYLabel = (val) => { if (testDef && testDef.feet_inches) return formatFeetInches(val); if (testDef && testDef.row_time) return formatRowTime(val); return Number.isInteger(val) ? val : val.toFixed(1); };
+  // Show at most ~6 date labels, always the first and last, never crowding the forced last one
+  const maxDates = Math.min(data.length, 6); const dStep = Math.max(1, Math.ceil(data.length / maxDates));
+  const showDate = (i) => { if (i === 0 || i === data.length - 1) return true; if (i % dStep !== 0) return false; return (data.length - 1 - i) >= dStep; };
+  // Thin value labels only when the series is dense; always keep first, last and the PR
+  const vStep = Math.max(1, Math.ceil(data.length / 9));
+  const showValue = (i) => data.length <= 10 || i === 0 || i === data.length - 1 || points[i].value === bestValue || i % vStep === 0;
+  // Put the label below valleys and above peaks so neighbouring numbers don't collide
+  const labelBelow = (i) => { const cur = points[i].value; const ns = []; if (i > 0) ns.push(points[i - 1].value); if (i < points.length - 1) ns.push(points[i + 1].value); return ns.length > 0 && ns.every(v => cur < v); };
   return (
     <div style={{ padding: '20px 0' }}>
-      <svg viewBox={'-40 -15 ' + (width + 70) + ' ' + (height + 45)} style={{ width: '100%', height: 280 }}>
-        {yLabels.map((val, i) => { const y = getY(val); if (y < -5 || y > height + 5) return null; return (<g key={i}><line x1={0} y1={y} x2={width} y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="1" /><text x={-8} y={y + 4} fill="#888" fontSize="9" textAnchor="end">{formatYLabel(val)}</text></g>); })}
-        <line x1={0} y1={getY(bestValue)} x2={width} y2={getY(bestValue)} stroke="#00ff88" strokeWidth="1.5" strokeDasharray="4,4" />
-        <text x={width + 3} y={getY(bestValue) + 4} fill="#00ff88" fontSize="9">{'PR: ' + formatVal(bestValue)}</text>
-        <path d={linePath} fill="none" stroke="#00d4ff" strokeWidth="2.5" />
-        {points.map((p, i) => (<g key={i} style={{ cursor: onPointClick ? 'pointer' : 'default' }} onClick={() => onPointClick && onPointClick(p)}><circle cx={p.x} cy={p.y} r={p.value === bestValue ? 7 : 5} fill={p.value === bestValue ? '#00ff88' : '#00d4ff'} /><text x={p.x} y={p.y - 12} fill={p.value === bestValue ? '#00ff88' : '#fff'} fontSize="10" fontWeight="700" textAnchor="middle">{formatVal(p.value)}</text><text x={p.x} y={height + 18} fill="#888" fontSize="8" textAnchor="middle">{p.date}</text></g>))}
+      <svg viewBox={'-40 -24 ' + (width + 58) + ' ' + (height + 56)} style={{ width: '100%', height: 280 }}>
+        <defs>
+          <linearGradient id="wsChartFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#00d4ff" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#00d4ff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {yLabels.map((val, i) => { const y = getY(val); if (y < -5 || y > height + 5) return null; return (<g key={i}><line x1={0} y1={y} x2={width} y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth="0.8" /><text x={-8} y={y + 3} fill="#888" fontSize="8" textAnchor="end">{formatYLabel(val)}</text></g>); })}
+        {areaPath && <path d={areaPath} fill="url(#wsChartFill)" stroke="none" />}
+        <line x1={0} y1={getY(bestValue)} x2={width} y2={getY(bestValue)} stroke="#00ff88" strokeWidth="1.2" strokeDasharray="4,4" strokeOpacity="0.7" />
+        <text x={1} y={getY(bestValue) - 4} fill="#00ff88" fontSize="8" fontWeight="700">{'PR ' + formatVal(bestValue)}</text>
+        <path d={linePath} fill="none" stroke="#00d4ff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((p, i) => { const isBest = p.value === bestValue; return (<g key={i} style={{ cursor: onPointClick ? 'pointer' : 'default' }} onClick={() => onPointClick && onPointClick(p)}>{isBest && <circle cx={p.x} cy={p.y} r="9" fill="none" stroke="#00ff88" strokeOpacity="0.3" strokeWidth="2" />}<circle cx={p.x} cy={p.y} r={isBest ? 6 : 4} fill={isBest ? '#00ff88' : '#00d4ff'} stroke="#0a1628" strokeWidth="1" />{showValue(i) && <text x={p.x} y={labelBelow(i) ? p.y + 15 : p.y - 10} fill={isBest ? '#00ff88' : '#fff'} fontSize="9" fontWeight="700" textAnchor="middle">{formatVal(p.value)}</text>}{showDate(i) && <text x={p.x} y={height + 16} fill="#888" fontSize="7.5" textAnchor="middle">{p.date}</text>}</g>); })}
       </svg>
     </div>
   );
