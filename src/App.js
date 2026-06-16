@@ -239,9 +239,14 @@ function smoothLinePath(pts) {
   return d;
 }
 
-function escapeXmlText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+// Rounded-rect path helper for canvas
+function roundRectPath(ctx, x, y, w, h, r) { const rr = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + rr, y); ctx.arcTo(x + w, y, x + w, y + h, rr); ctx.arcTo(x + w, y + h, x, y + h, rr); ctx.arcTo(x, y + h, x, y, rr); ctx.arcTo(x, y, x + w, y, rr); ctx.closePath(); }
+// Traces the same Catmull-Rom smoothing as smoothLinePath() onto a canvas context (caller handles fill/stroke)
+function traceSmoothPath(ctx, pts) { if (!pts || pts.length === 0) return; ctx.moveTo(pts[0].x, pts[0].y); if (pts.length === 1) return; if (pts.length === 2) { ctx.lineTo(pts[1].x, pts[1].y); return; } const t = 0.16; for (let i = 0; i < pts.length - 1; i++) { const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2; const c1x = p1.x + (p2.x - p0.x) * t, c1y = p1.y + (p2.y - p0.y) * t, c2x = p2.x - (p3.x - p1.x) * t, c2y = p2.y - (p3.y - p1.y) * t; ctx.bezierCurveTo(c1x, c1y, c2x, c2y, p2.x, p2.y); } }
 
-// Builds a branded, story-sized (1080x1920) PNG of a progress chart and downloads it — ready to drop into a reel/story
+// Builds a branded, story-sized (1080x1920) PNG of a progress chart. Drawn synchronously on a canvas
+// (no async image load) so the Web Share API stays inside the user gesture — on iOS this opens the
+// share sheet (Save to Photos / post to a story); on desktop it falls back to a download.
 function exportProgressShareImage({ athleteName, testName, prText, data, direction, testDef, rangeText }) {
   if (!data || data.length === 0) return;
   const W = 1080, H = 1920;
@@ -265,31 +270,52 @@ function exportProgressShareImage({ athleteName, testName, prText, data, directi
   const vStep = Math.max(1, Math.ceil(n / 9));
   const showValue = (i) => n <= 10 || i === 0 || i === n - 1 || points[i].value === bestValue || i % vStep === 0;
   const labelBelow = (i) => { const cur = points[i].value; const ns = []; if (i > 0) ns.push(points[i - 1].value); if (i < n - 1) ns.push(points[i + 1].value); return ns.length > 0 && ns.every(v => cur < v); };
-  const linePath = smoothLinePath(points); const pry = getY(bestValue);
-  let s = '';
-  s += `<rect width="${W}" height="${H}" fill="#0a1628"/>`;
-  s += `<rect x="40" y="40" width="${W - 80}" height="${H - 80}" fill="none" stroke="rgba(0,212,255,0.18)" stroke-width="3" rx="32"/>`;
-  s += `<text x="${W / 2}" y="190" fill="#00d4ff" font-family="Arial Black, Arial, sans-serif" font-size="62" font-weight="900" text-anchor="middle" letter-spacing="2">WILMINGTON STRENGTH</text>`;
-  s += `<text x="${W / 2}" y="244" fill="#9fb3c8" font-family="Arial, sans-serif" font-size="30" text-anchor="middle" letter-spacing="10">PERFORMANCE TRACKING</text>`;
-  s += `<line x1="170" y1="296" x2="${W - 170}" y2="296" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>`;
-  s += `<text x="${W / 2}" y="416" fill="#ffffff" font-family="Arial Black, Arial, sans-serif" font-size="90" font-weight="900" text-anchor="middle">${escapeXmlText(athleteName)}</text>`;
-  s += `<text x="${W / 2}" y="490" fill="#00d4ff" font-family="Arial, sans-serif" font-size="44" text-anchor="middle" letter-spacing="2">${escapeXmlText(String(testName || '').toUpperCase())} PROGRESS</text>`;
-  if (prText) { const pillW = Math.min(940, Math.max(440, prText.length * 34 + 120)); const pillX = (W - pillW) / 2; s += `<rect x="${pillX}" y="548" width="${pillW}" height="110" rx="55" fill="rgba(0,255,136,0.14)" stroke="#00ff88" stroke-width="3"/>`; s += `<text x="${W / 2}" y="622" fill="#00ff88" font-family="Arial Black, Arial, sans-serif" font-size="54" font-weight="900" text-anchor="middle">${escapeXmlText(prText)}</text>`; }
-  s += `<rect x="80" y="760" width="${W - 160}" height="940" rx="28" fill="rgba(255,255,255,0.03)"/>`;
-  s += `<defs><linearGradient id="shareFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00d4ff" stop-opacity="0.30"/><stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/></linearGradient></defs>`;
-  yLabels.forEach((val) => { const y = getY(val); if (y < plotTop - 5 || y > plotBot + 5) return; s += `<line x1="${plotL}" y1="${y}" x2="${plotR}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1.5"/>`; s += `<text x="${plotL - 18}" y="${y + 9}" fill="#8a96a3" font-family="Arial, sans-serif" font-size="26" text-anchor="end">${escapeXmlText(fmtY(val))}</text>`; });
-  if (n > 1) s += `<path d="${linePath} L ${points[n - 1].x} ${plotBot} L ${points[0].x} ${plotBot} Z" fill="url(#shareFill)"/>`;
-  s += `<line x1="${plotL}" y1="${pry}" x2="${plotR}" y2="${pry}" stroke="#00ff88" stroke-width="2.5" stroke-dasharray="10,8" stroke-opacity="0.7"/>`;
-  s += `<path d="${linePath}" fill="none" stroke="#00d4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
-  points.forEach((p, i) => { const isBest = p.value === bestValue; if (isBest) s += `<circle cx="${p.x}" cy="${p.y}" r="24" fill="none" stroke="#00ff88" stroke-opacity="0.3" stroke-width="5"/>`; s += `<circle cx="${p.x}" cy="${p.y}" r="${isBest ? 15 : 11}" fill="${isBest ? '#00ff88' : '#00d4ff'}" stroke="#0a1628" stroke-width="3"/>`; if (showValue(i)) { const ly = labelBelow(i) ? p.y + 44 : p.y - 26; s += `<text x="${p.x}" y="${ly}" fill="${isBest ? '#00ff88' : '#ffffff'}" font-family="Arial Black, Arial, sans-serif" font-size="28" font-weight="900" text-anchor="middle">${escapeXmlText(fmtVal(p.value))}</text>`; } if (showDate(i)) s += `<text x="${p.x}" y="${plotBot + 48}" fill="#8a96a3" font-family="Arial, sans-serif" font-size="24" text-anchor="middle">${escapeXmlText(p.date)}</text>`; });
-  if (rangeText) s += `<text x="${W / 2}" y="1772" fill="#aab7c4" font-family="Arial, sans-serif" font-size="30" text-anchor="middle">${escapeXmlText(rangeText)}</text>`;
-  s += `<text x="${W / 2}" y="${H - 70}" fill="#00d4ff" font-family="Arial, sans-serif" font-size="28" text-anchor="middle" letter-spacing="3">wilmington-strength-app.netlify.app</text>`;
-  const full = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${s}</svg>`;
+  const pry = getY(bestValue);
+  const BLACK = '"Arial Black", Arial, sans-serif', SANS = 'Arial, sans-serif';
+
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
-  const img = new Image();
-  img.onload = () => { ctx.drawImage(img, 0, 0, W, H); const link = document.createElement('a'); link.download = `${String(athleteName).replace(/\s+/g, '_')}_${String(testName || 'progress').replace(/\s+/g, '_')}.png`; link.href = canvas.toDataURL('image/png'); link.click(); };
-  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(full)));
+  ctx.fillStyle = '#0a1628'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(0,212,255,0.18)'; ctx.lineWidth = 3; roundRectPath(ctx, 40, 40, W - 80, H - 80, 32); ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#00d4ff'; ctx.font = '900 62px ' + BLACK; ctx.fillText('WILMINGTON STRENGTH', W / 2, 190);
+  ctx.fillStyle = '#9fb3c8'; ctx.font = '30px ' + SANS; ctx.fillText('PERFORMANCE TRACKING', W / 2, 244);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(170, 296); ctx.lineTo(W - 170, 296); ctx.stroke();
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 90px ' + BLACK; ctx.fillText(String(athleteName || ''), W / 2, 416);
+  ctx.fillStyle = '#00d4ff'; ctx.font = '44px ' + SANS; ctx.fillText(String(testName || '').toUpperCase() + ' PROGRESS', W / 2, 490);
+  if (prText) {
+    ctx.font = '900 54px ' + BLACK; const tw = ctx.measureText(prText).width;
+    const pillW = Math.min(960, Math.max(440, tw + 120)); const pillX = (W - pillW) / 2;
+    ctx.fillStyle = 'rgba(0,255,136,0.14)'; roundRectPath(ctx, pillX, 548, pillW, 110, 55); ctx.fill();
+    ctx.strokeStyle = '#00ff88'; ctx.lineWidth = 3; roundRectPath(ctx, pillX, 548, pillW, 110, 55); ctx.stroke();
+    ctx.fillStyle = '#00ff88'; ctx.textBaseline = 'middle'; ctx.fillText(prText, W / 2, 605); ctx.textBaseline = 'alphabetic';
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.03)'; roundRectPath(ctx, 80, 760, W - 160, 940, 28); ctx.fill();
+  yLabels.forEach((val) => { const y = getY(val); if (y < plotTop - 5 || y > plotBot + 5) return; ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke(); ctx.fillStyle = '#8a96a3'; ctx.font = '26px ' + SANS; ctx.textAlign = 'right'; ctx.fillText(String(fmtY(val)), plotL - 18, y + 9); });
+  ctx.textAlign = 'center';
+  if (n > 1) { const grad = ctx.createLinearGradient(0, plotTop, 0, plotBot); grad.addColorStop(0, 'rgba(0,212,255,0.30)'); grad.addColorStop(1, 'rgba(0,212,255,0)'); ctx.fillStyle = grad; ctx.beginPath(); traceSmoothPath(ctx, points); ctx.lineTo(points[n - 1].x, plotBot); ctx.lineTo(points[0].x, plotBot); ctx.closePath(); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(0,255,136,0.7)'; ctx.lineWidth = 2.5; ctx.setLineDash([10, 8]); ctx.beginPath(); ctx.moveTo(plotL, pry); ctx.lineTo(plotR, pry); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); traceSmoothPath(ctx, points); ctx.stroke();
+  points.forEach((p, i) => {
+    const isBest = p.value === bestValue;
+    if (isBest) { ctx.strokeStyle = 'rgba(0,255,136,0.3)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(p.x, p.y, 24, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = isBest ? '#00ff88' : '#00d4ff'; ctx.beginPath(); ctx.arc(p.x, p.y, isBest ? 15 : 11, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#0a1628'; ctx.lineWidth = 3; ctx.stroke();
+    if (showValue(i)) { ctx.fillStyle = isBest ? '#00ff88' : '#ffffff'; ctx.font = '900 28px ' + BLACK; ctx.fillText(String(fmtVal(p.value)), p.x, labelBelow(i) ? p.y + 44 : p.y - 26); }
+    if (showDate(i)) { ctx.fillStyle = '#8a96a3'; ctx.font = '24px ' + SANS; ctx.fillText(String(p.date), p.x, plotBot + 48); }
+  });
+  if (rangeText) { ctx.fillStyle = '#aab7c4'; ctx.font = '30px ' + SANS; ctx.fillText(rangeText, W / 2, 1772); }
+  ctx.fillStyle = '#00d4ff'; ctx.font = '28px ' + SANS; ctx.fillText('wilmington-strength-app.netlify.app', W / 2, H - 70);
+
+  const fileName = `${String(athleteName).replace(/\s+/g, '_')}_${String(testName || 'progress').replace(/\s+/g, '_')}.png`;
+  const dataUrl = canvas.toDataURL('image/png');
+  const triggerDownload = () => { const link = document.createElement('a'); link.download = fileName; link.href = dataUrl; link.click(); };
+  let file = null;
+  try { const bin = atob(dataUrl.split(',')[1]); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); file = new File([arr], fileName, { type: 'image/png' }); } catch (e) { file = null; }
+  if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+    navigator.share({ files: [file], title: String(athleteName || '') + ' — ' + String(testName || 'Progress') }).catch((err) => { if (!err || err.name !== 'AbortError') triggerDownload(); });
+  } else {
+    triggerDownload();
+  }
 }
 
 function SimpleChart({ data, direction, testDef, onPointClick }) {
@@ -469,6 +495,8 @@ const findTestMatches = (transcript, testList) => {
 /* ===================== MAIN APP ===================== */
 export default function App() {
   const [page, setPage] = useState('entry');
+  const [focusAthlete, setFocusAthlete] = useState(null);
+  const goToAthlete = (id) => { setFocusAthlete(id); setPage('athletes'); };
   const [athletes, setAthletes] = useState([]);
   const [results, setResults] = useState([]);
   const [testDefs, setTestDefs] = useState([]);
@@ -637,8 +665,8 @@ export default function App() {
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
-        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
-        {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} />}
+        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
+        {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
@@ -1125,7 +1153,7 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
 }
 
 /* ===================== COMBINED ATHLETES PAGE ===================== */
-function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult, getAssessment, saveAssessment }) {
+function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult, getAssessment, saveAssessment, focusAthlete, clearFocusAthlete }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
@@ -1152,6 +1180,7 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const startEditInfo = () => { if (!athlete) return; setFirstName(athlete.first_name); setLastName(athlete.last_name); setBirthday(athlete.birthday ? String(athlete.birthday).slice(0, 10) : ''); setGender(athlete.gender || 'Male'); setEmail(athlete.email || ''); setPhone(athlete.phone || ''); setStatus(athlete.status || 'Active'); setType(athlete.type || 'athlete'); setEditingInfo(true); };
   const saveEditInfo = () => { updateAthlete(selectedAthlete, { firstName, lastName, birthday, gender, email, phone, status, type }); setEditingInfo(false); };
   const handleSelectAthlete = (id) => { setSelectedAthlete(id); setEditingInfo(false); setProfileTab('prs'); setSelectedTest(''); setChartStart(''); setChartEnd(''); setEditingResult(null); setHistoryFilter(''); };
+  useEffect(() => { if (focusAthlete) { handleSelectAthlete(focusAthlete); if (clearFocusAthlete) clearFocusAthlete(); window.scrollTo(0, 0); } }, [focusAthlete]);
   const handleEditResult = (r) => { setEditingResult(r.id); setEditDate(String(r.test_date).slice(0, 10)); setEditValue(String(r.raw_value)); };
   const handleSaveResult = (r) => { updateResult(r.id, { testId: r.test_id, testDate: editDate, rawValue: parseFloat(editValue) }); setEditingResult(null); };
   const filteredAthletes = athletes.filter(a => { const nm = !searchTerm || (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase()); const tm = filterType === 'all' || (a.type || 'athlete') === filterType; return nm && tm; });
@@ -1401,7 +1430,7 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
 }
 
 /* ===================== RECENT PRS + RESULTS EXPLORER ===================== */
-function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
+function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthlete }) {
   const [view, setView] = useState('recent');
   const [timeFrame, setTimeFrame] = useState('week');
   const [filterTest, setFilterTest] = useState('');
@@ -1475,7 +1504,7 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
             <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={filterTest} onChange={(e) => setFilterTest(e.target.value)} style={{ ...iStyle, width: 220 }}><option value="">All Tests</option>{testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
             <div style={{ padding: '12px 20px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700, fontSize: 18 }}>{recentPRs.length} PR{recentPRs.length !== 1 ? 's' : ''}</div>
           </div>
-          {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a ? `${a.first_name} ${a.last_name}` : 'Unknown'}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
+          {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a && onSelectAthlete ? (<span onClick={() => onSelectAthlete(a.id)} style={{ cursor: 'pointer', color: '#00d4ff', textDecoration: 'underline', textDecorationColor: 'rgba(0,212,255,0.4)' }}>{`${a.first_name} ${a.last_name}`}</span>) : (a ? `${a.first_name} ${a.last_name}` : 'Unknown')}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
         </div>
       )}
 
@@ -1530,7 +1559,7 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs }) {
                       {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 15 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
+                      <div style={{ fontWeight: 600, fontSize: 15, ...(onSelectAthlete ? { color: '#00d4ff', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'rgba(0,212,255,0.4)' } : {}) }} onClick={onSelectAthlete ? () => onSelectAthlete(row.athlete.id) : undefined}>{row.athlete.first_name} {row.athlete.last_name}</div>
                       <div style={{ fontSize: 11, color: '#555' }}>{row.athlete.gender}{row.athlete.type === 'adult' ? ' · Adult' : ''}</div>
                     </div>
                     <div style={{ textAlign: 'center', fontSize: 14, color: '#aaa' }}>{age !== null ? age : ''}</div>
