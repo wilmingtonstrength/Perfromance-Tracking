@@ -668,7 +668,7 @@ export default function App() {
         {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
-        {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} />}
+        {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} getTestById={getTestById} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
@@ -1625,292 +1625,287 @@ function JumpCalcPage({ athletes, setAthletes, results, logResults, getPR, showN
   );
 }
 
-/* ===================== ATHLETE PROFILE PAGE ===================== */
-const PROFILE_ATTRS = [
-  { id: 'rsi', label: 'RSI', shortLabel: 'RSI', direction: 'higher', type: 'direct', testIds: ['rsi'] },
-  { id: 'elastic_util', label: 'Elastic Util', shortLabel: 'Elastic', direction: 'higher', type: 'computed', compute: 'elastic' },
-  { id: 'symmetry', label: 'Symmetry', shortLabel: 'Symm', direction: 'higher', type: 'computed', compute: 'symmetry' },
-  { id: 'acceleration', label: 'Acceleration', shortLabel: 'Accel', direction: 'lower', type: 'direct', testIds: ['5_10_fly'] },
-  { id: 'max_velocity', label: 'Max Velocity', shortLabel: 'MaxVel', direction: 'higher', type: 'direct', testIds: ['max_velocity'] },
-  { id: 'cod', label: 'COD', shortLabel: 'COD', direction: 'lower', type: 'computed', compute: 'cod' },
-  { id: 'clean', label: 'Clean', shortLabel: 'Clean', direction: 'higher', type: 'direct', testIds: ['clean'] },
-  { id: 'squat', label: 'Squat', shortLabel: 'Squat', direction: 'higher', type: 'rollup', testIds: ['back_squat', 'front_squat'] },
+/* ===================== ATHLETE PROFILE PAGE (PERCENTILES) ===================== */
+const PCTL_SPEED_TESTS = [
+  { id: '5_10_fly',  name: '5-10 Fly',  dir: 'lower' },
+  { id: '10_10_fly', name: '10-10 Fly', dir: 'lower' },
+  { id: '15_10_fly', name: '15-10 Fly', dir: 'lower' },
+  { id: '20_10_fly', name: '20-10 Fly', dir: 'lower' },
+  { id: 'max_velocity', name: 'Max Velocity', dir: 'higher' },
+];
+const PCTL_JUMP_TESTS = [
+  { id: 'vertical_jump', name: 'Vertical Jump',  dir: 'higher' },
+  { id: 'approach_jump', name: 'Approach Jump',  dir: 'higher' },
+  { id: 'broad_jump',    name: 'Broad Jump',     dir: 'higher' },
+];
+const PCTL_COD_TESTS = [
+  { id: '5_0_5', name: '5-0-5 Agility', dir: 'lower' },
+];
+const PCTL_GROUPS = [
+  { id: 'speed', label: 'Speed Map',           tests: PCTL_SPEED_TESTS, accent: '#00d4ff' },
+  { id: 'jumps', label: 'Jumps',               tests: PCTL_JUMP_TESTS,  accent: '#a855f7' },
+  { id: 'cod',   label: 'Change of Direction', tests: PCTL_COD_TESTS,   accent: '#FFA500' },
 ];
 
-function AthleteProfilePage({ athletes, results }) {
-  const [selectedAthlete, setSelectedAthlete] = useState(null);
-  const [genderFilter, setGenderFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
+// Percentile rank: how this athlete's PR compares to the gender pool.
+// Returns 0–100, where 100 = best in pool. Handles ties (half-rank for equals).
+const pctlRank = (value, pool, dir) => {
+  if (value == null || !pool || pool.length === 0) return null;
+  let better = 0, equal = 0;
+  for (const v of pool) {
+    if (dir === 'higher') { if (v < value) better++; else if (v === value) equal++; }
+    else                  { if (v > value) better++; else if (v === value) equal++; }
+  }
+  return Math.round(((better + 0.5 * equal) / pool.length) * 100);
+};
+
+// Coach asked: green ≥75, yellow 50–74, red 0–49.
+const pctlColor = (pct) => {
+  if (pct == null) return '#666';
+  if (pct >= 75) return '#00ff88';
+  if (pct >= 50) return '#FFA500';
+  return '#ff6666';
+};
+
+const pctlBg = (pct) => {
+  const c = pctlColor(pct);
+  if (c === '#666') return 'rgba(255,255,255,0.04)';
+  return c + '22';
+};
+
+const genderOf = (a) => ((a && a.gender) || '').toLowerCase().startsWith('f') ? 'F' : 'M';
+
+const bestForTest = (athleteId, testId, results, dir) => {
+  const vals = results.filter(r => r.athlete_id === athleteId && r.test_id === testId)
+    .map(r => parseFloat(r.converted_value))
+    .filter(v => !isNaN(v));
+  if (vals.length === 0) return null;
+  return dir === 'higher' ? Math.max(...vals) : Math.min(...vals);
+};
+
+function AthleteProfilePage({ athletes, results, getTestById }) {
+  const [mode, setMode] = useState('athlete'); // 'athlete' | 'test'
+  const [selectedAthleteId, setSelectedAthleteId] = useState(null);
+  const [byTestGroupId, setByTestGroupId] = useState('speed');
+  const [byTestId, setByTestId] = useState('5_10_fly');
+  const [byTestGender, setByTestGender] = useState('M');
 
   const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+  const allTests = [...PCTL_SPEED_TESTS, ...PCTL_JUMP_TESTS, ...PCTL_COD_TESTS];
 
-  const getBestVal = (athleteId, testIds, direction) => {
-    const vals = results.filter(r => r.athlete_id === athleteId && testIds.includes(r.test_id)).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
-    if (vals.length === 0) return null;
-    return direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
-  };
+  // pools[testId][gender] = sorted array of PR values for that pool. Used to
+  // compute every percentile in the page, so we build it once per render.
+  const pools = {};
+  const prByAthlete = {}; // prByAthlete[athleteId][testId] = best value
+  for (const t of allTests) pools[t.id] = { M: [], F: [] };
+  for (const a of youthAthletes) {
+    prByAthlete[a.id] = {};
+    const g = genderOf(a);
+    for (const t of allTests) {
+      const pr = bestForTest(a.id, t.id, results, t.dir);
+      prByAthlete[a.id][t.id] = pr;
+      if (pr != null) pools[t.id][g].push(pr);
+    }
+  }
 
-  const getAttrRaw = (athleteId) => {
-    const raw = {};
-    PROFILE_ATTRS.forEach(attr => {
-      if (attr.type === 'direct') {
-        raw[attr.id] = getBestVal(athleteId, attr.testIds, attr.direction);
-      } else if (attr.type === 'rollup') {
-        raw[attr.id] = getBestVal(athleteId, attr.testIds, attr.direction);
-      } else if (attr.compute === 'elastic') {
-        const aj = getBestVal(athleteId, ['approach_jump'], 'higher');
-        const vj = getBestVal(athleteId, ['vertical_jump'], 'higher');
-        raw[attr.id] = (aj !== null && vj !== null && vj > 0) ? (aj / vj) * 100 : null;
-      } else if (attr.compute === 'symmetry') {
-        const left = getBestVal(athleteId, ['sl_rsi_left'], 'higher');
-        const right = getBestVal(athleteId, ['sl_rsi_right'], 'higher');
-        raw[attr.id] = (left !== null && right !== null && Math.max(left, right) > 0) ? (Math.min(left, right) / Math.max(left, right)) * 100 : null;
-      } else if (attr.compute === 'cod') {
-        const fly = getBestVal(athleteId, ['5_10_fly'], 'lower');
-        const fiveOFive = getBestVal(athleteId, ['5_0_5'], 'lower');
-        raw[attr.id] = (fly !== null && fiveOFive !== null && fly > 0) ? ((fiveOFive - fly) / fly) * 100 : null;
-      }
-    });
-    return raw;
-  };
-
-  const popStats = {};
-  PROFILE_ATTRS.forEach(attr => {
-    const vals = [];
-    youthAthletes.forEach(a => {
-      const raw = getAttrRaw(a.id);
-      if (raw[attr.id] !== null) vals.push(raw[attr.id]);
-    });
-    if (vals.length < 5) { popStats[attr.id] = null; return; }
-    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-    const sd = Math.sqrt(vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / vals.length) || 1;
-    popStats[attr.id] = { mean, sd, n: vals.length };
-  });
-
-  const scoreAthlete = (athleteId) => {
-    const raw = getAttrRaw(athleteId);
-    const attrScores = [];
-    PROFILE_ATTRS.forEach(attr => {
-      if (!popStats[attr.id] || raw[attr.id] === null) return;
-      const { mean, sd } = popStats[attr.id];
-      const z = attr.direction === 'lower' ? (mean - raw[attr.id]) / sd : (raw[attr.id] - mean) / sd;
-      const pct = normalCDF(z);
-      attrScores.push({ attr, rawValue: raw[attr.id], z, pct });
-    });
-    if (attrScores.length === 0) return null;
-    const avgZ = attrScores.reduce((s, a) => s + a.z, 0) / attrScores.length;
-    const overall = normalCDF(avgZ);
-    return { overall, attrScores, testsUsed: attrScores.length };
-  };
-
-  const allScored = youthAthletes.map(a => {
-    const s = scoreAthlete(a.id);
-    return s ? { athlete: a, ...s } : null;
-  }).filter(Boolean)
-    .filter(row => { if (genderFilter === 'all') return true; const g = (row.athlete.gender || '').toLowerCase(); return genderFilter === 'female' ? g === 'female' : g !== 'female'; })
-    .filter(row => !searchTerm || `${row.athlete.first_name} ${row.athlete.last_name}`.toLowerCase().includes(searchTerm.toLowerCase()))
-    .sort((a, b) => b.overall - a.overall);
-
-  const formatAttrVal = (attr, val) => {
-    if (val === null || val === undefined) return '-';
-    if (attr.id === 'rsi') return val.toFixed(2);
-    if (attr.id === 'elastic_util' || attr.id === 'symmetry') return val.toFixed(1) + '%';
-    if (attr.id === 'acceleration') return val.toFixed(2) + 's';
-    if (attr.id === 'max_velocity') return val.toFixed(1) + ' MPH';
-    if (attr.id === 'cod') return val.toFixed(1) + '%';
-    if (attr.id === 'clean' || attr.id === 'squat') return Math.round(val) + ' lbs';
+  const formatPRValue = (testId, val) => {
+    if (val == null) return '—';
+    const td = getTestById ? getTestById(testId) : null;
+    if (td) return formatResultWithUnit(td, val);
     return String(val);
   };
 
-  /* ---- DETAIL VIEW ---- */
-  if (selectedAthlete) {
-    const athlete = athletes.find(a => a.id === selectedAthlete);
-    if (!athlete) { setSelectedAthlete(null); return null; }
-    const profile = scoreAthlete(selectedAthlete);
-    const age = calculateAge(athlete.birthday);
+  const renderPctlBar = (pct) => {
+    const safe = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+    const color = pctlColor(pct);
+    return (
+      <div style={{ width: '100%', height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ height: '100%', width: `${safe}%`, background: color, borderRadius: 4, transition: 'width 0.4s' }} />
+      </div>
+    );
+  };
 
-    if (!profile) {
-      return (
-        <div>
-          <button onClick={() => setSelectedAthlete(null)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
-          <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28 }}>{athlete.first_name} {athlete.last_name}</h2>
-          <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 16 }}>Not enough data to generate a profile.</p><p style={{ fontSize: 13 }}>Needs at least one scored attribute with 5+ athletes in the population.</p></div>
+  const selectedAthlete = youthAthletes.find(a => a.id === selectedAthleteId);
+
+  // -------------- BY ATHLETE -------------------
+  const renderByAthlete = () => (
+    <div>
+      <div style={{ marginBottom: 20, maxWidth: 460 }}>
+        <AthleteSearchPicker
+          athletes={youthAthletes}
+          value={selectedAthleteId}
+          onChange={(id) => setSelectedAthleteId(id)}
+          placeholder="Search athlete..."
+          filterType="athlete"
+        />
+      </div>
+      {!selectedAthlete && (
+        <div style={{ textAlign: 'center', padding: 64, color: '#666' }}>
+          Pick an athlete above to see their percentile profile.
         </div>
-      );
-    }
+      )}
+      {selectedAthlete && (() => {
+        const g = genderOf(selectedAthlete);
+        const age = calculateAge(selectedAthlete.birthday);
+        const cohortLabel = g === 'F' ? 'female' : 'male';
+        return (
+          <div>
+            <div style={{ marginBottom: 24, padding: 20, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h2 style={{ margin: 0, fontFamily: "'Archivo Black', sans-serif", fontSize: 26 }}>{selectedAthlete.first_name} {selectedAthlete.last_name}</h2>
+              <p style={{ margin: '6px 0 0 0', color: '#888', fontSize: 13 }}>
+                {selectedAthlete.gender}{age != null ? ` · ${age} yrs` : ''} · Compared against all {cohortLabel} youth athletes at the gym
+              </p>
+            </div>
+            {PCTL_GROUPS.map(grp => (
+              <div key={grp.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: 13, color: grp.accent, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>{grp.label}</h3>
+                <div style={{ display: 'grid', gap: 14 }}>
+                  {grp.tests.map(t => {
+                    const pr = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id][t.id] : null;
+                    const pool = pools[t.id][g];
+                    const pct = pctlRank(pr, pool, t.dir);
+                    return (
+                      <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 70px 80px 60px', alignItems: 'center', gap: 12 }}>
+                        <div style={{ fontSize: 14, color: '#ddd', fontWeight: 600 }}>{t.name}</div>
+                        <div>{renderPctlBar(pct)}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: pctlColor(pct), textAlign: 'right' }}>
+                          {pct != null ? `${pct}%` : '—'}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#aaa', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {formatPRValue(t.id, pr)}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#666', textAlign: 'right' }}>
+                          {pool.length > 0 ? `n=${pool.length}` : '—'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>
+              Green ≥ 75th percentile · Yellow 50–74th · Red below 50th. Pool size n is the number of {cohortLabel} youth athletes who have a recorded result for that test.
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
 
-    const sl = scoreLabel(profile.overall);
+  // -------------- BY TEST -------------------
+  const renderByTest = () => {
+    const group = PCTL_GROUPS.find(g => g.id === byTestGroupId) || PCTL_GROUPS[0];
+    const rankTest = group.tests.find(t => t.id === byTestId) || group.tests[0];
+    // Athletes who have a result on the ranking test, in the chosen gender.
+    const rows = youthAthletes
+      .filter(a => genderOf(a) === byTestGender)
+      .map(a => {
+        const pcts = {};
+        let primaryPR = null, primaryPct = null;
+        group.tests.forEach(t => {
+          const pr = prByAthlete[a.id] ? prByAthlete[a.id][t.id] : null;
+          const pct = pctlRank(pr, pools[t.id][byTestGender], t.dir);
+          pcts[t.id] = { pr, pct };
+          if (t.id === rankTest.id) { primaryPR = pr; primaryPct = pct; }
+        });
+        return { athlete: a, pcts, primaryPR, primaryPct };
+      })
+      .filter(r => r.primaryPR != null)
+      .sort((a, b) => (b.primaryPct ?? -1) - (a.primaryPct ?? -1));
 
-    /* Radar chart */
-    const radarSize = 300;
-    const cx = radarSize / 2;
-    const cy = radarSize / 2;
-    const maxR = radarSize / 2 - 40;
-    const numAxes = 8;
-    const angleStep = (2 * Math.PI) / numAxes;
-    const startAngle = -Math.PI / 2;
-
-    const getPoint = (index, pct) => {
-      const angle = startAngle + index * angleStep;
-      const r = (pct / 100) * maxR;
-      return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
-    };
-
-    const gridLevels = [20, 40, 60, 80, 100];
-    const radarValues = PROFILE_ATTRS.map(attr => {
-      const found = profile.attrScores.find(s => s.attr.id === attr.id);
-      return found ? found.pct : null;
+    const pillBtn = (active, accent) => ({
+      padding: '8px 14px',
+      background: active ? `linear-gradient(135deg, ${accent} 0%, ${accent}cc 100%)` : 'rgba(255,255,255,0.05)',
+      border: 'none', borderRadius: 6,
+      color: active ? '#0a1628' : '#aaa',
+      fontWeight: active ? 700 : 500, cursor: 'pointer', fontSize: 13,
     });
-
-    const polygonPoints = radarValues.map((pct, i) => {
-      if (pct === null) return null;
-      return getPoint(i, pct);
-    });
-    const validPoints = polygonPoints.filter(p => p !== null);
-    const polygonStr = validPoints.map(p => `${p.x},${p.y}`).join(' ');
-
-    /* Training buckets */
-    const getAttrPct = (attrId) => { const found = profile.attrScores.find(s => s.attr.id === attrId); return found ? found.pct : null; };
-    const below35 = (attrId) => { const p = getAttrPct(attrId); return p !== null && p < 35; };
-    const buckets = [];
-    if (below35('rsi')) buckets.push({ label: 'Needs Spring', color: '#ff6ec7', desc: 'Low RSI — reactive strength deficit', rx: 'Swap last accessory for: Pogo hops, altitude drops, or depth jumps' });
-    if (below35('elastic_util') && below35('cod')) buckets.push({ label: 'Needs Eccentric', color: '#FFA500', desc: 'Poor elastic utilization + poor COD', rx: 'Swap last accessory for: Eccentric squats, Nordic curls, or drop-catch landing drills' });
-    if (below35('rsi') && below35('elastic_util')) buckets.push({ label: 'Needs Force', color: '#ff4444', desc: 'Low RSI + low elastic utilization', rx: 'Swap last accessory for: Weighted jumps, trap bar jumps, or heavy sled marches' });
-    if (below35('clean') && below35('squat')) buckets.push({ label: 'Needs Strength', color: '#a855f7', desc: 'Low clean + squat scores', rx: 'Swap last accessory for: Heavy goblet squats, DB lunges, or pause squats' });
-    if (below35('acceleration') && below35('max_velocity')) buckets.push({ label: 'Needs Speed', color: '#00d4ff', desc: 'Low acceleration + max velocity', rx: 'Swap last accessory for: 10-yd sprints, wicket runs, or sled sprints (10-15% BW)' });
-    const showWellRounded = buckets.length === 0 && profile.testsUsed >= 4;
 
     return (
       <div>
-        <button onClick={() => setSelectedAthlete(null)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
-
-        <div style={{ display: 'flex', gap: 32, alignItems: 'center', marginBottom: 32, flexWrap: 'wrap' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 80, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: sl.color, lineHeight: 1 }}>{profile.overall}</div>
-            <div style={{ fontSize: 14, color: sl.color, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>{sl.label}</div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Group</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {PCTL_GROUPS.map(g => (
+                <button key={g.id} onClick={() => { setByTestGroupId(g.id); setByTestId(g.tests[0].id); }} style={pillBtn(byTestGroupId === g.id, g.accent)}>{g.label}</button>
+              ))}
+            </div>
           </div>
           <div>
-            <h2 style={{ margin: 0, fontFamily: "'Archivo Black', sans-serif", fontSize: 28 }}>{athlete.first_name} {athlete.last_name}</h2>
-            <p style={{ margin: '4px 0 0', color: '#888', fontSize: 14 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · {profile.testsUsed}/8 attributes scored</p>
+            <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Rank by</div>
+            <select value={byTestId} onChange={(e) => setByTestId(e.target.value)} style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
+              {group.tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
           </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 32 }}>
-          <div style={{ flex: '0 0 auto' }}>
-            <svg width={radarSize} height={radarSize} viewBox={`0 0 ${radarSize} ${radarSize}`}>
-              {gridLevels.map(lvl => {
-                const pts = Array.from({ length: numAxes }, (_, i) => getPoint(i, lvl));
-                return React.createElement('polygon', { key: lvl, points: pts.map(p => `${p.x},${p.y}`).join(' '), fill: 'none', stroke: 'rgba(255,255,255,0.08)', strokeWidth: 1 });
-              })}
-              {PROFILE_ATTRS.map((_, i) => {
-                const end = getPoint(i, 100);
-                return React.createElement('line', { key: i, x1: cx, y1: cy, x2: end.x, y2: end.y, stroke: 'rgba(255,255,255,0.06)', strokeWidth: 1 });
-              })}
-              {validPoints.length >= 3 && React.createElement('polygon', { points: polygonStr, fill: 'rgba(0,212,255,0.15)', stroke: '#00d4ff', strokeWidth: 2 })}
-              {radarValues.map((pct, i) => {
-                if (pct === null) return null;
-                const p = getPoint(i, pct);
-                const slc = scoreLabel(pct);
-                return React.createElement('g', { key: i },
-                  React.createElement('circle', { cx: p.x, cy: p.y, r: 5, fill: slc.color }),
-                  React.createElement('text', { x: p.x, y: p.y - 10, fill: slc.color, fontSize: 11, fontWeight: 700, textAnchor: 'middle' }, pct)
-                );
-              })}
-              {PROFILE_ATTRS.map((attr, i) => {
-                const labelPt = getPoint(i, 118);
-                return React.createElement('text', { key: attr.id, x: labelPt.x, y: labelPt.y, fill: '#888', fontSize: 10, fontWeight: 600, textAnchor: 'middle', dominantBaseline: 'middle' }, attr.shortLabel);
-              })}
-            </svg>
-          </div>
-
-          <div style={{ flex: 1, minWidth: 280 }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Attribute Breakdown</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {PROFILE_ATTRS.map(attr => {
-                const found = profile.attrScores.find(s => s.attr.id === attr.id);
-                const pct = found ? found.pct : null;
-                const raw = found ? found.rawValue : null;
-                const slc = pct !== null ? scoreLabel(pct) : null;
-                return (
-                  <div key={attr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
-                    <div style={{ width: 100, fontSize: 13, fontWeight: 600, color: '#ccc' }}>{attr.label}</div>
-                    <div style={{ width: 44, textAlign: 'center', fontSize: 18, fontWeight: 800, color: slc ? slc.color : '#444' }}>{pct !== null ? pct : '—'}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
-                        {pct !== null && React.createElement('div', { style: { height: '100%', width: `${pct}%`, background: slc.color, borderRadius: 3 } })}
-                      </div>
-                    </div>
-                    <div style={{ width: 80, textAlign: 'right', fontSize: 12, color: '#666' }}>{raw !== null ? formatAttrVal(attr, raw) : 'No data'}</div>
-                  </div>
-                );
-              })}
+          <div>
+            <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Gender</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['M','F'].map(g => (
+                <button key={g} onClick={() => setByTestGender(g)} style={pillBtn(byTestGender === g, group.accent)}>{g === 'M' ? 'Male' : 'Female'}</button>
+              ))}
             </div>
           </div>
         </div>
-
-        {(buckets.length > 0 || showWellRounded) && (
-          <div style={{ marginBottom: 32 }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Training Priorities</h3>
-            {showWellRounded && (
-              <div style={{ padding: '16px 20px', background: 'rgba(0,255,136,0.08)', borderRadius: 10, border: '1px solid rgba(0,255,136,0.25)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 24 }}>✅</span>
-                <div><div style={{ fontWeight: 700, color: '#00ff88', fontSize: 16 }}>Well-Rounded</div><div style={{ color: '#888', fontSize: 13, marginTop: 2 }}>No major deficits detected across scored attributes</div></div>
-              </div>
-            )}
-            {buckets.map((b, i) => (
-              <div key={i} style={{ padding: '16px 20px', background: `${b.color}10`, borderRadius: 10, border: `1px solid ${b.color}30`, marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <span style={{ padding: '3px 10px', background: `${b.color}25`, borderRadius: 6, color: b.color, fontWeight: 700, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase' }}>{b.label}</span>
-                  <span style={{ color: '#888', fontSize: 13 }}>{b.desc}</span>
+        {rows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No {byTestGender === 'M' ? 'male' : 'female'} youth athletes have a recorded {rankTest.name} result yet.</div>
+        ) : (
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `40px minmax(180px, 1fr) ${group.tests.map(t => t.id === rankTest.id ? '110px' : '90px').join(' ')}`, gap: 0, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)', minWidth: 'fit-content' }}>
+              <div>#</div>
+              <div>Athlete</div>
+              {group.tests.map(t => (
+                <div key={t.id} style={{ textAlign: 'center', color: t.id === rankTest.id ? group.accent : '#888', fontWeight: t.id === rankTest.id ? 700 : 500 }}>
+                  {t.name}{t.id === rankTest.id ? ' ▼' : ''}
                 </div>
-                <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic' }}>{b.rx}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* ---- LIST VIEW ---- */
-  return (
-    <div>
-      <div style={{ marginBottom: 24 }}><h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Athlete Profiles</h1><p style={{ color: '#888' }}>{allScored.length} of {youthAthletes.length} youth athletes scored</p></div>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="text" placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16, width: 240 }} />
-        <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>{[['all','All'],['male','Boys'],['female','Girls']].map(([val, label]) => (
-          <button key={val} onClick={() => setGenderFilter(val)} style={{ padding: '10px 20px', background: genderFilter === val ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: genderFilter === val ? '2px solid #00d4ff' : '2px solid transparent', color: genderFilter === val ? '#00d4ff' : '#666', fontWeight: genderFilter === val ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{label}</button>
-        ))}</div>
-      </div>
-      {allScored.length === 0 ? (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes with enough data to score.</p><p style={{ fontSize: 13 }}>Attributes need at least 5 athletes in the population.</p></div>) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {allScored.map((row) => { const sl = scoreLabel(row.overall); const age = calculateAge(row.athlete.birthday); return (
-            <div key={row.athlete.id} onClick={() => setSelectedAthlete(row.athlete.id)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer' }}>
-              <div style={{ width: 52, height: 52, borderRadius: 10, background: `${sl.color}20`, border: `2px solid ${sl.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ fontSize: 22, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: sl.color }}>{row.overall}</span>
-              </div>
-              <div style={{ flex: '0 0 160px' }}>
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
-                <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{row.athlete.gender && ` · ${row.athlete.gender}`}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
-                {PROFILE_ATTRS.map(attr => {
-                  const found = row.attrScores.find(s => s.attr.id === attr.id);
-                  const pct = found ? found.pct : null;
-                  const slc = pct !== null ? scoreLabel(pct) : null;
+              ))}
+            </div>
+            {rows.map((row, idx) => (
+              <div key={row.athlete.id} style={{ display: 'grid', gridTemplateColumns: `40px minmax(180px, 1fr) ${group.tests.map(t => t.id === rankTest.id ? '110px' : '90px').join(' ')}`, gap: 0, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', minWidth: 'fit-content' }}>
+                <div style={{ color: '#666', fontWeight: 600, fontSize: 13 }}>{idx + 1}</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
+                  <div style={{ fontSize: 11, color: '#666' }}>{calculateAge(row.athlete.birthday) != null ? `${calculateAge(row.athlete.birthday)} yrs` : ''}</div>
+                </div>
+                {group.tests.map(t => {
+                  const cell = row.pcts[t.id];
+                  const pct = cell.pct;
+                  const isRank = t.id === rankTest.id;
                   return (
-                    <div key={attr.id} title={attr.label} style={{ width: 40, height: 40, borderRadius: 6, background: slc ? `${slc.color}18` : 'rgba(255,255,255,0.04)', border: `1px solid ${slc ? slc.color + '44' : 'rgba(255,255,255,0.06)'}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: slc ? slc.color : '#333' }}>{pct !== null ? pct : '—'}</span>
-                      <span style={{ fontSize: 7, color: '#555', textAlign: 'center', lineHeight: 1, marginTop: 1 }}>{attr.shortLabel}</span>
+                    <div key={t.id} style={{ textAlign: 'center', padding: '6px 4px', margin: '0 4px', background: pctlBg(pct), borderRadius: 6, border: isRank ? `1px solid ${pctlColor(pct)}55` : '1px solid transparent' }}>
+                      <div style={{ fontSize: isRank ? 16 : 14, fontWeight: 800, color: pctlColor(pct), lineHeight: 1.1 }}>
+                        {pct != null ? `${pct}` : '—'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>
+                        {formatPRValue(t.id, cell.pr)}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ fontSize: 12, color: '#555', flexShrink: 0 }}>{row.testsUsed}/8</div>
-            </div>
-          ); })}
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: '#666', marginTop: 12 }}>
+          Numbers shown are percentile ranks (0–99) against {byTestGender === 'M' ? 'male' : 'female'} youth athletes at the gym. Green ≥ 75th, yellow 50–74th, red below 50th. Best PR shown below each percentile.
         </div>
-      )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ margin: 0, fontFamily: "'Archivo Black', sans-serif", fontSize: 32 }}>Profile</h1>
+          <p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 13 }}>Percentile rank against the gym's own youth athlete data.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setMode('athlete')} style={{ padding: '10px 18px', background: mode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 6, color: mode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: mode === 'athlete' ? 700 : 500, cursor: 'pointer', fontSize: 13 }}>By Athlete</button>
+          <button onClick={() => setMode('test')} style={{ padding: '10px 18px', background: mode === 'test' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 6, color: mode === 'test' ? '#0a1628' : '#aaa', fontWeight: mode === 'test' ? 700 : 500, cursor: 'pointer', fontSize: 13 }}>By Test</button>
+        </div>
+      </div>
+      {mode === 'athlete' ? renderByAthlete() : renderByTest()}
     </div>
   );
 }
