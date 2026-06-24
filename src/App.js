@@ -1686,7 +1686,6 @@ const bestForTest = (athleteId, testId, results, dir) => {
 function AthleteProfilePage({ athletes, results, getTestById }) {
   const [mode, setMode] = useState('athlete'); // 'athlete' | 'test'
   const [selectedAthleteId, setSelectedAthleteId] = useState(null);
-  const [byTestGroupId, setByTestGroupId] = useState('speed');
   const [byTestId, setByTestId] = useState('5_10_fly');
   const [byTestGender, setByTestGender] = useState('M');
 
@@ -1794,15 +1793,21 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
 
   // -------------- BY TEST -------------------
   const renderByTest = () => {
-    const group = PCTL_GROUPS.find(g => g.id === byTestGroupId) || PCTL_GROUPS[0];
-    const rankTest = group.tests.find(t => t.id === byTestId) || group.tests[0];
+    // All 9 tests shown side-by-side regardless of group. The coach asked
+    // to see speed + jumps + COD in one table — picking a group up front
+    // was extra friction once you'd used the page for two seconds.
+    const allTests = [...PCTL_SPEED_TESTS, ...PCTL_JUMP_TESTS, ...PCTL_COD_TESTS];
+    const groupOf = (testId) => PCTL_GROUPS.find(g => g.tests.some(t => t.id === testId)) || PCTL_GROUPS[0];
+    const rankTest = allTests.find(t => t.id === byTestId) || allTests[0];
+    const rankGroup = groupOf(rankTest.id);
+
     // Athletes who have a result on the ranking test, in the chosen gender.
     const rows = youthAthletes
       .filter(a => genderOf(a) === byTestGender)
       .map(a => {
         const pcts = {};
         let primaryPR = null, primaryPct = null;
-        group.tests.forEach(t => {
+        allTests.forEach(t => {
           const pr = prByAthlete[a.id] ? prByAthlete[a.id][t.id] : null;
           const pct = pctlRank(pr, pools[t.id][byTestGender], t.dir);
           pcts[t.id] = { pr, pct };
@@ -1821,28 +1826,27 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
       fontWeight: active ? 700 : 500, cursor: 'pointer', fontSize: 13,
     });
 
+    // Grid: # | Athlete | [9 test cols]. Ranking col gets 105px, others 76px.
+    const colWidths = `36px minmax(160px, 1fr) ${allTests.map(t => t.id === rankTest.id ? '105px' : '76px').join(' ')}`;
+
     return (
       <div>
         <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Group</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {PCTL_GROUPS.map(g => (
-                <button key={g.id} onClick={() => { setByTestGroupId(g.id); setByTestId(g.tests[0].id); }} style={pillBtn(byTestGroupId === g.id, g.accent)}>{g.label}</button>
-              ))}
-            </div>
-          </div>
-          <div>
             <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Rank by</div>
             <select value={byTestId} onChange={(e) => setByTestId(e.target.value)} style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14 }}>
-              {group.tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {PCTL_GROUPS.map(g => (
+                <optgroup key={g.id} label={g.label}>
+                  {g.tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Gender</div>
             <div style={{ display: 'flex', gap: 6 }}>
               {['M','F'].map(g => (
-                <button key={g} onClick={() => setByTestGender(g)} style={pillBtn(byTestGender === g, group.accent)}>{g === 'M' ? 'Male' : 'Female'}</button>
+                <button key={g} onClick={() => setByTestGender(g)} style={pillBtn(byTestGender === g, rankGroup.accent)}>{g === 'M' ? 'Male' : 'Female'}</button>
               ))}
             </div>
           </div>
@@ -1851,32 +1855,53 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
           <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No {byTestGender === 'M' ? 'male' : 'female'} youth athletes have a recorded {rankTest.name} result yet.</div>
         ) : (
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'auto' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: `40px minmax(180px, 1fr) ${group.tests.map(t => t.id === rankTest.id ? '110px' : '90px').join(' ')}`, gap: 0, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)', minWidth: 'fit-content' }}>
+            {/* Group band — shows which columns belong to Speed/Jumps/COD */}
+            <div style={{ display: 'grid', gridTemplateColumns: colWidths, padding: '8px 16px 0 16px', minWidth: 'fit-content' }}>
+              <div></div>
+              <div></div>
+              {allTests.map((t, idx) => {
+                const g = groupOf(t.id);
+                const prev = idx > 0 ? groupOf(allTests[idx - 1].id) : null;
+                const isFirstInGroup = !prev || prev.id !== g.id;
+                return (
+                  <div key={t.id} style={{ textAlign: 'center', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: g.accent, textTransform: 'uppercase', opacity: isFirstInGroup ? 1 : 0.35 }}>
+                    {isFirstInGroup ? g.label.toUpperCase() : '·'}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Column headers */}
+            <div style={{ display: 'grid', gridTemplateColumns: colWidths, fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 16px 12px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)', minWidth: 'fit-content' }}>
               <div>#</div>
               <div>Athlete</div>
-              {group.tests.map(t => (
-                <div key={t.id} style={{ textAlign: 'center', color: t.id === rankTest.id ? group.accent : '#888', fontWeight: t.id === rankTest.id ? 700 : 500 }}>
-                  {t.name}{t.id === rankTest.id ? ' ▼' : ''}
-                </div>
-              ))}
+              {allTests.map(t => {
+                const g = groupOf(t.id);
+                const isRank = t.id === rankTest.id;
+                return (
+                  <div key={t.id} style={{ textAlign: 'center', color: isRank ? g.accent : '#999', fontWeight: isRank ? 800 : 600, fontSize: isRank ? 12 : 10 }}>
+                    {t.name}{isRank ? ' ▼' : ''}
+                  </div>
+                );
+              })}
             </div>
+            {/* Rows */}
             {rows.map((row, idx) => (
-              <div key={row.athlete.id} style={{ display: 'grid', gridTemplateColumns: `40px minmax(180px, 1fr) ${group.tests.map(t => t.id === rankTest.id ? '110px' : '90px').join(' ')}`, gap: 0, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', minWidth: 'fit-content' }}>
+              <div key={row.athlete.id} style={{ display: 'grid', gridTemplateColumns: colWidths, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', minWidth: 'fit-content' }}>
                 <div style={{ color: '#666', fontWeight: 600, fontSize: 13 }}>{idx + 1}</div>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{row.athlete.first_name} {row.athlete.last_name}</div>
                   <div style={{ fontSize: 11, color: '#666' }}>{calculateAge(row.athlete.birthday) != null ? `${calculateAge(row.athlete.birthday)} yrs` : ''}</div>
                 </div>
-                {group.tests.map(t => {
+                {allTests.map(t => {
                   const cell = row.pcts[t.id];
                   const pct = cell.pct;
                   const isRank = t.id === rankTest.id;
                   return (
-                    <div key={t.id} style={{ textAlign: 'center', padding: '6px 4px', margin: '0 4px', background: pctlBg(pct), borderRadius: 6, border: isRank ? `1px solid ${pctlColor(pct)}55` : '1px solid transparent' }}>
-                      <div style={{ fontSize: isRank ? 16 : 14, fontWeight: 800, color: pctlColor(pct), lineHeight: 1.1 }}>
+                    <div key={t.id} style={{ textAlign: 'center', padding: '6px 2px', margin: '0 3px', background: pctlBg(pct), borderRadius: 6, border: isRank ? `1px solid ${pctlColor(pct)}55` : '1px solid transparent' }}>
+                      <div style={{ fontSize: isRank ? 16 : 13, fontWeight: 800, color: pctlColor(pct), lineHeight: 1.1 }}>
                         {pct != null ? `${pct}` : '—'}
                       </div>
-                      <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>
+                      <div style={{ fontSize: 9, color: '#888', marginTop: 2 }}>
                         {formatPRValue(t.id, cell.pr)}
                       </div>
                     </div>
@@ -1887,7 +1912,7 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
           </div>
         )}
         <div style={{ fontSize: 11, color: '#666', marginTop: 12 }}>
-          Numbers shown are percentile ranks (0–99) against {byTestGender === 'M' ? 'male' : 'female'} youth athletes at the gym. Green ≥ 75th, yellow 50–74th, red below 50th. Best PR shown below each percentile.
+          Numbers shown are percentile ranks (0–99) against {byTestGender === 'M' ? 'male' : 'female'} youth athletes at the gym. Green ≥ 75th, yellow 50–74th, red below 50th. Best PR shown below each percentile. Scroll horizontally on phone to see all columns.
         </div>
       </div>
     );
