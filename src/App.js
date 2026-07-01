@@ -9,9 +9,12 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const formatFeetInches = (totalInches) => {
   if (totalInches === null || totalInches === undefined || isNaN(totalInches)) return '-';
   const ft = Math.floor(totalInches / 12);
-  const inches = Math.round(totalInches % 12);
-  if (inches === 12) return `${ft + 1}'0"`;
-  return `${ft}'${inches}"`;
+  // Keep one decimal so a half-inch jump (e.g. 6'4.5") is never rounded UP to
+  // the next inch (6'5"). Whole numbers still print clean ("6'4"").
+  let inches = Math.round((totalInches % 12) * 10) / 10;
+  if (inches >= 12) return `${ft + 1}'0"`;
+  const inchStr = Number.isInteger(inches) ? String(inches) : inches.toFixed(1);
+  return `${ft}'${inchStr}"`;
 };
 const preventScrollChange = (e) => { e.target.blur(); };
 const calculateAge = (birthday) => {
@@ -2707,20 +2710,27 @@ function AdultProgramPage({ athletes, results, getTestById }) {
     );
   }
 
-  const body = (
+  const renderBody = (isTv) => {
+    // TV mode gets much larger warm-up / movement print (readable across the
+    // gym) and a more compact challenge card so it doesn't hog vertical space.
+    const wuName = isTv ? 30 : 16, wuDetail = isTv ? 19 : 12, wuBadge = isTv ? 50 : 34, wuBadgeFont = isTv ? 24 : 15, wuGap = isTv ? 20 : 14;
+    const mvName = isTv ? 27 : 15, mvDetail = isTv ? 18 : 12, mvBlockLabel = isTv ? 17 : 11, mvPad = isTv ? '14px 18px' : '10px 12px';
+    const cardPad = isTv ? 28 : 24, labelFont = isTv ? 18 : 12;
+    const chPad = isTv ? '16px 24px' : 28, chTitle = isTv ? 30 : 34, chName = isTv ? 24 : 22, chNum = isTv ? 40 : 36, chCardPad = isTv ? '14px 18px' : 22;
+    return (
     <>
       {/* WARM-UP + MOVEMENT — side by side on wide screens, stacked on phone */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: isTv ? 24 : 20, marginBottom: isTv ? 16 : 24 }}>
         {/* Warm-Up */}
-        <div style={{ ...cardBase, background: 'rgba(255,165,0,0.06)', border: `1px solid rgba(255,165,0,0.28)` }}>
-          <div style={{ ...sectionLabel, color: orange, marginBottom: 20 }}>Warm-Up</div>
-          <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ ...cardBase, padding: cardPad, background: 'rgba(255,165,0,0.06)', border: `1px solid rgba(255,165,0,0.28)` }}>
+          <div style={{ ...sectionLabel, fontSize: labelFont, color: orange, marginBottom: isTv ? 22 : 20 }}>Warm-Up</div>
+          <div style={{ display: 'grid', gap: wuGap }}>
             {routine.warmup.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,165,0,0.18)', color: orange, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 15, flexShrink: 0 }}>{i + 1}</div>
-                <div style={{ paddingTop: 4 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: '#fff', lineHeight: 1.2 }}>{e.name}</div>
-                  {e.detail && <div style={{ fontSize: 12, color: '#aaa', marginTop: 3 }}>{e.detail}</div>}
+              <div key={i} style={{ display: 'flex', gap: isTv ? 18 : 14, alignItems: 'flex-start' }}>
+                <div style={{ width: wuBadge, height: wuBadge, borderRadius: '50%', background: 'rgba(255,165,0,0.18)', color: orange, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: wuBadgeFont, flexShrink: 0 }}>{i + 1}</div>
+                <div style={{ paddingTop: isTv ? 8 : 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: wuName, color: '#fff', lineHeight: 1.2 }}>{e.name}</div>
+                  {e.detail && <div style={{ fontSize: wuDetail, color: '#bbb', marginTop: 3 }}>{e.detail}</div>}
                 </div>
               </div>
             ))}
@@ -2728,24 +2738,24 @@ function AdultProgramPage({ athletes, results, getTestById }) {
         </div>
 
         {/* Movement */}
-        <div style={{ ...cardBase, background: 'rgba(0,212,255,0.05)', border: `1px solid rgba(0,212,255,0.25)` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ ...sectionLabel, color: cyan }}>Movement</div>
+        <div style={{ ...cardBase, padding: cardPad, background: 'rgba(0,212,255,0.05)', border: `1px solid rgba(0,212,255,0.25)` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isTv ? 22 : 20, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ ...sectionLabel, fontSize: labelFont, color: cyan }}>Movement</div>
             {routine.movement.rounds && (
-              <div style={{ fontSize: 12, color: '#aaa', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{routine.movement.rounds}</div>
+              <div style={{ fontSize: isTv ? 16 : 12, color: '#bbb', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{routine.movement.rounds}</div>
             )}
           </div>
-          <div style={{ display: 'grid', gap: 18 }}>
+          <div style={{ display: 'grid', gap: isTv ? 16 : 18 }}>
             {routine.movement.blocks.map((block) => (
               <div key={block.label}>
-                <div style={{ fontSize: 11, color: cyan, fontWeight: 800, letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Block {block.label}</div>
+                <div style={{ fontSize: mvBlockLabel, color: cyan, fontWeight: 800, letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Block {block.label}</div>
                 <div style={{ display: 'grid', gap: 10 }}>
                   {block.exercises.map((e, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
-                      <div style={{ fontSize: 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: 28, textAlign: 'center', paddingTop: 2 }}>{block.label}{block.exercises.length > 1 ? i + 1 : ''}</div>
+                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: mvPad, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                      <div style={{ fontSize: isTv ? 18 : 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: isTv ? 40 : 28, textAlign: 'center', paddingTop: 2 }}>{block.label}{block.exercises.length > 1 ? i + 1 : ''}</div>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 15 }}>{e.name}</div>
-                        {e.detail && <div style={{ fontSize: 12, color: '#aaa', marginTop: 3 }}>{e.detail}</div>}
+                        <div style={{ fontWeight: 700, fontSize: mvName }}>{e.name}</div>
+                        {e.detail && <div style={{ fontSize: mvDetail, color: '#bbb', marginTop: 3 }}>{e.detail}</div>}
                       </div>
                     </div>
                   ))}
@@ -2758,51 +2768,60 @@ function AdultProgramPage({ athletes, results, getTestById }) {
 
       {/* CHALLENGE OF THE MONTH */}
       {challengeTest && (
-        <div style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.09), rgba(255,165,0,0.04))', borderRadius: 14, padding: 28, border: `1px solid rgba(255,215,0,0.4)`, boxShadow: '0 0 40px rgba(255,215,0,0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12, marginBottom: 22 }}>
+        <div style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.09), rgba(255,165,0,0.04))', borderRadius: 14, padding: chPad, border: `1px solid rgba(255,215,0,0.4)`, boxShadow: '0 0 40px rgba(255,215,0,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12, marginBottom: isTv ? 12 : 22 }}>
             <div>
-              <div style={{ ...sectionLabel, color: gold }}>🏆 Challenge of the Month</div>
-              <h2 style={{ margin: '6px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 34, letterSpacing: 1 }}>{challengeTest.name}</h2>
+              <div style={{ ...sectionLabel, color: gold, fontSize: isTv ? 13 : 12 }}>🏆 Challenge of the Month</div>
+              <h2 style={{ margin: '6px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: chTitle, letterSpacing: 1 }}>{challengeTest.name}</h2>
             </div>
-            <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>
-              Adult category · Top male + top female<br />
-              Results from {new Date(challengeDateWindow.first + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {new Date(challengeDateWindow.last + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-            </div>
+            {!isTv && (
+              <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>
+                Adult category · Top male + top female<br />
+                Results from {new Date(challengeDateWindow.first + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {new Date(challengeDateWindow.last + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </div>
+            )}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
             {[
               { label: "Men's Leader", entry: topMale, color: cyan },
               { label: "Women's Leader", entry: topFemale, color: pink },
             ].map(({ label, entry, color }) => (
-              <div key={label} style={{ background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 22, border: `1px solid ${color}44` }}>
-                <div style={{ ...sectionLabel, color, fontSize: 10 }}>{label}</div>
-                {entry ? (
-                  <>
-                    <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 22, marginTop: 10, lineHeight: 1.1 }}>
+              <div key={label} style={{ background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: chCardPad, border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ ...sectionLabel, color, fontSize: isTv ? 11 : 10 }}>{label}</div>
+                  {entry ? (
+                    <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: chName, marginTop: 6, lineHeight: 1.1 }}>
                       {entry.athlete.first_name} {entry.athlete.last_name}
                     </div>
-                    <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 36, fontWeight: 900, color, marginTop: 12, lineHeight: 1 }}>
-                      {formatResultWithUnit(challengeTest, entry.converted_value)}
+                  ) : (
+                    <div style={{ marginTop: 8, color: '#666', fontSize: isTv ? 16 : 14, fontStyle: 'italic' }}>
+                      No entries yet — crown's up for grabs
                     </div>
-                    <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+                  )}
+                  {entry && !isTv && (
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
                       Set {new Date(entry.test_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
-                  </>
-                ) : (
-                  <div style={{ padding: '20px 0 8px 0', color: '#666', fontSize: 14, fontStyle: 'italic', textAlign: 'center' }}>
-                    No entries yet<br />— crown's up for grabs —
+                  )}
+                </div>
+                {entry && (
+                  <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: chNum, fontWeight: 900, color, lineHeight: 1, whiteSpace: 'nowrap' }}>
+                    {formatResultWithUnit(challengeTest, entry.converted_value)}
                   </div>
                 )}
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 18, textAlign: 'center' }}>
-            New month, new challenge — leaderboard resets on the 1st.
-          </div>
+          {!isTv && (
+            <div style={{ fontSize: 11, color: '#666', marginTop: 18, textAlign: 'center' }}>
+              New month, new challenge — leaderboard resets on the 1st.
+            </div>
+          )}
         </div>
       )}
     </>
-  );
+    );
+  };
 
   // ---- TV MODE: full-screen, auto-scaled to fit ----
   if (tvMode) {
@@ -2815,7 +2834,7 @@ function AdultProgramPage({ athletes, results, getTestById }) {
         </div>
         <div ref={tvContainerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <div ref={tvContentRef} style={{ transformOrigin: 'top left', transform: `scale(${tvScale})` }}>
-            {body}
+            {renderBody(true)}
           </div>
         </div>
       </div>
@@ -2832,7 +2851,7 @@ function AdultProgramPage({ athletes, results, getTestById }) {
         </div>
         <button onClick={() => setTvMode(true)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 6, color: '#0a1628', cursor: 'pointer', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>TV Mode</button>
       </div>
-      {body}
+      {renderBody(false)}
     </div>
   );
 }
