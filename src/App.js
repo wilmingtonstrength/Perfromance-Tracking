@@ -2684,6 +2684,14 @@ function AdultProgramPage({ athletes, results, getTestById }) {
   const cardBase = { background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 24 };
   const sectionLabel = { fontSize: 12, letterSpacing: 3, fontWeight: 800, textTransform: 'uppercase' };
 
+  // ---- TV MODE (same pattern as the Record Board) ----
+  const [tvMode, setTvMode] = useState(false);
+  const wakeLockRef = useRef(null);
+  useEffect(() => { if (!tvMode) { if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } return; } const req = async () => { try { if ('wakeLock' in navigator) { wakeLockRef.current = await navigator.wakeLock.request('screen'); } } catch {} }; req(); const h = () => { if (document.visibilityState === 'visible') req(); }; document.addEventListener('visibilitychange', h); return () => { document.removeEventListener('visibilitychange', h); if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); } }; }, [tvMode]);
+  const tvContentRef = useRef(null); const tvContainerRef = useRef(null); const [tvScale, setTvScale] = useState(1);
+  useEffect(() => { if (!tvMode) return; const recalc = () => { const content = tvContentRef.current; const container = tvContainerRef.current; if (!content || !container) return; content.style.transform = 'none'; content.style.width = container.clientWidth + 'px'; const naturalH = content.scrollHeight; const availH = container.clientHeight; const scale = Math.min(availH / naturalH, 1); setTvScale(scale); content.style.width = (container.clientWidth / scale) + 'px'; content.style.transform = `scale(${scale})`; }; const timer = setTimeout(recalc, 50); window.addEventListener('resize', recalc); return () => { clearTimeout(timer); window.removeEventListener('resize', recalc); }; }, [tvMode]);
+  useEffect(() => { if (!tvMode) return; const keepAlive = setInterval(() => { document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: Math.floor(Math.random() * 1920), clientY: Math.floor(Math.random() * 1080) })); }, 600000); return () => clearInterval(keepAlive); }, [tvMode]);
+
   if (!routine) {
     return (
       <div>
@@ -2699,14 +2707,8 @@ function AdultProgramPage({ athletes, results, getTestById }) {
     );
   }
 
-  return (
-    <div>
-      {/* HEADER */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ ...sectionLabel, color: orange }}>Adult Program</div>
-        <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40, letterSpacing: 1 }}>{routine.label}</h1>
-      </div>
-
+  const body = (
+    <>
       {/* WARM-UP + MOVEMENT — side by side on wide screens, stacked on phone */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20, marginBottom: 24 }}>
         {/* Warm-Up */}
@@ -2799,6 +2801,38 @@ function AdultProgramPage({ athletes, results, getTestById }) {
           </div>
         </div>
       )}
+    </>
+  );
+
+  // ---- TV MODE: full-screen, auto-scaled to fit ----
+  if (tvMode) {
+    return (
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0a1628', zIndex: 9999, padding: '10px 12px', overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: `4px solid ${orange}` }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: cyan, letterSpacing: 3, fontFamily: "'Archivo Black', sans-serif" }}>WILMINGTON STRENGTH</div>
+          <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4, color: orange, fontFamily: "'Archivo Black', sans-serif" }}>{routine.label.toUpperCase()}</div>
+          <button onClick={() => setTvMode(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '1px solid #666', borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 12 }}>EXIT TV</button>
+        </div>
+        <div ref={tvContainerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          <div ref={tvContentRef} style={{ transformOrigin: 'top left', transform: `scale(${tvScale})` }}>
+            {body}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 28 }}>
+        <div>
+          <div style={{ ...sectionLabel, color: orange }}>Adult Program</div>
+          <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40, letterSpacing: 1 }}>{routine.label}</h1>
+        </div>
+        <button onClick={() => setTvMode(true)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 6, color: '#0a1628', cursor: 'pointer', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>TV Mode</button>
+      </div>
+      {body}
     </div>
   );
 }
