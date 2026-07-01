@@ -153,6 +153,42 @@ const calculateAthleteScore = (athleteId, allAthletes, allResults) => {
   return { score: overall, testsUsed: zScores.length, totalTests: TSA_TEST_IDS.length, breakdown, avgZ };
 };
 
+/* ===================== ADULT PROGRAM OF THE MONTH =====================
+   Each entry drives the Adult Program page — warm-up, movement block, and the
+   Challenge of the Month leaderboard. `monthKey` is `YYYY-MM` and the page
+   auto-swaps to the matching entry on the 1st of that month. Add a new entry
+   here whenever the next month's programming is ready. Keep an entry (even
+   empty) for every month so the display never falls back to the placeholder. */
+const ADULT_PROGRAM_MONTHS = [
+  {
+    monthKey: '2026-07',
+    label: 'July 2026',
+    warmup: [
+      { name: "3' Run / Bike / Row / Sled", detail: 'Get the heart rate up' },
+      { name: '90/90 Hip Shift', detail: 'With hip lift · 10 each' },
+      { name: 'Half-Kneeling Hip Rocks', detail: 'Forward + lateral · 10 each' },
+      { name: 'Iso Lunge', detail: '30 sec each side' },
+      { name: 'Halos', detail: '5 each way' },
+      { name: 'Prying Goblet Squat', detail: '3 sec hold in the bottom' },
+    ],
+    movement: {
+      rounds: '2–3 rounds',
+      blocks: [
+        { label: 'A', exercises: [
+          { name: '5-0-5 Drill', detail: '4 reps · 2 each direction' },
+        ]},
+        { label: 'B', exercises: [
+          { name: 'Single-Leg Box Jumps', detail: '5 each side · 2 rounds' },
+          { name: 'Broad Jump', detail: '2 each · 2 rounds' },
+        ]},
+      ],
+    },
+    challenge: {
+      testId: 'broad_jump',
+    },
+  },
+];
+
 /* ===================== SEARCH PICKER ===================== */
 function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...', filterType = null }) {
   const [search, setSearch] = useState('');
@@ -646,6 +682,7 @@ export default function App() {
     { id: 'progressreports', label: '📋 Reports' },
     { id: 'mphclub', label: '🏎️ MPH Club' },
     { id: 'assessments', label: '📝 Assessments' },
+    { id: 'adultprogram', label: '💪 Adult Program' },
   ];
 
   return (
@@ -674,6 +711,7 @@ export default function App() {
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
         {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
+        {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -2595,5 +2633,172 @@ function MphClubPage({ athletes, results }) {
         );
       })
     )
+  );
+}
+
+/* ===================== ADULT PROGRAM PAGE =====================
+   Displays the current month's warm-up + movement + Challenge of the Month
+   leaderboard (top male + top female for the challenge test, filtered to
+   results recorded THIS month, adult category only). Auto-swaps to the next
+   month's routine on the 1st via ADULT_PROGRAM_MONTHS lookup. */
+function AdultProgramPage({ athletes, results, getTestById }) {
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const routine = ADULT_PROGRAM_MONTHS.find(r => r.monthKey === monthKey);
+
+  // Only compute the leaderboard for the routine's month — if we're mid-August
+  // and only July is defined we don't want August results appearing under it.
+  let topMale = null;
+  let topFemale = null;
+  let challengeTest = null;
+  let challengeDateWindow = null;
+  if (routine && routine.challenge && routine.challenge.testId) {
+    challengeTest = getTestById(routine.challenge.testId);
+    const [yr, mo] = routine.monthKey.split('-').map(Number);
+    const firstOfMonth = `${routine.monthKey}-01`;
+    const lastDay = new Date(yr, mo, 0).getDate();
+    const lastOfMonth = `${routine.monthKey}-${String(lastDay).padStart(2, '0')}`;
+    challengeDateWindow = { first: firstOfMonth, last: lastOfMonth };
+    const adultResults = results
+      .filter(r => r.test_id === routine.challenge.testId)
+      .filter(r => r.test_date >= firstOfMonth && r.test_date <= lastOfMonth)
+      .map(r => {
+        const ath = athletes.find(a => a.id === r.athlete_id);
+        if (!ath || (ath.type || 'athlete') !== 'adult') return null;
+        return { ...r, athlete: ath };
+      })
+      .filter(Boolean);
+    const byGender = (g) => adultResults
+      .filter(r => (r.athlete.gender || '').toLowerCase().startsWith(g))
+      .sort((a, b) => parseFloat(b.converted_value) - parseFloat(a.converted_value))[0] || null;
+    topMale = byGender('m');
+    topFemale = byGender('f');
+  }
+
+  const orange = '#FFA500';
+  const cyan = '#00d4ff';
+  const gold = '#ffd700';
+  const pink = '#ff6ba0';
+
+  const cardBase = { background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 24 };
+  const sectionLabel = { fontSize: 12, letterSpacing: 3, fontWeight: 800, textTransform: 'uppercase' };
+
+  if (!routine) {
+    return (
+      <div>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ ...sectionLabel, color: orange }}>Adult Program</div>
+          <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40 }}>{monthLabel}</h1>
+        </div>
+        <div style={{ ...cardBase, textAlign: 'center', padding: 48, border: `1px dashed rgba(255,165,0,0.3)` }}>
+          <div style={{ fontSize: 15, color: '#aaa', marginBottom: 6 }}>No program dropped for this month yet.</div>
+          <div style={{ fontSize: 12, color: '#666' }}>Ask Claude to add {monthLabel} to ADULT_PROGRAM_MONTHS in src/App.js.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ ...sectionLabel, color: orange }}>Adult Program</div>
+        <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40, letterSpacing: 1 }}>{routine.label}</h1>
+      </div>
+
+      {/* WARM-UP + MOVEMENT — side by side on wide screens, stacked on phone */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20, marginBottom: 24 }}>
+        {/* Warm-Up */}
+        <div style={{ ...cardBase, background: 'rgba(255,165,0,0.06)', border: `1px solid rgba(255,165,0,0.28)` }}>
+          <div style={{ ...sectionLabel, color: orange, marginBottom: 20 }}>Warm-Up</div>
+          <div style={{ display: 'grid', gap: 14 }}>
+            {routine.warmup.map((e, i) => (
+              <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,165,0,0.18)', color: orange, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 15, flexShrink: 0 }}>{i + 1}</div>
+                <div style={{ paddingTop: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: '#fff', lineHeight: 1.2 }}>{e.name}</div>
+                  {e.detail && <div style={{ fontSize: 12, color: '#aaa', marginTop: 3 }}>{e.detail}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Movement */}
+        <div style={{ ...cardBase, background: 'rgba(0,212,255,0.05)', border: `1px solid rgba(0,212,255,0.25)` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ ...sectionLabel, color: cyan }}>Movement</div>
+            {routine.movement.rounds && (
+              <div style={{ fontSize: 12, color: '#aaa', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{routine.movement.rounds}</div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gap: 18 }}>
+            {routine.movement.blocks.map((block) => (
+              <div key={block.label}>
+                <div style={{ fontSize: 11, color: cyan, fontWeight: 800, letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Block {block.label}</div>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {block.exercises.map((e, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: 28, textAlign: 'center', paddingTop: 2 }}>{block.label}{block.exercises.length > 1 ? i + 1 : ''}</div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{e.name}</div>
+                        {e.detail && <div style={{ fontSize: 12, color: '#aaa', marginTop: 3 }}>{e.detail}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* CHALLENGE OF THE MONTH */}
+      {challengeTest && (
+        <div style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.09), rgba(255,165,0,0.04))', borderRadius: 14, padding: 28, border: `1px solid rgba(255,215,0,0.4)`, boxShadow: '0 0 40px rgba(255,215,0,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12, marginBottom: 22 }}>
+            <div>
+              <div style={{ ...sectionLabel, color: gold }}>🏆 Challenge of the Month</div>
+              <h2 style={{ margin: '6px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 34, letterSpacing: 1 }}>{challengeTest.name}</h2>
+            </div>
+            <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>
+              Adult category · Top male + top female<br />
+              Results from {new Date(challengeDateWindow.first + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – {new Date(challengeDateWindow.last + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+            {[
+              { label: "Men's Leader", entry: topMale, color: cyan },
+              { label: "Women's Leader", entry: topFemale, color: pink },
+            ].map(({ label, entry, color }) => (
+              <div key={label} style={{ background: 'rgba(0,0,0,0.28)', borderRadius: 12, padding: 22, border: `1px solid ${color}44` }}>
+                <div style={{ ...sectionLabel, color, fontSize: 10 }}>{label}</div>
+                {entry ? (
+                  <>
+                    <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 22, marginTop: 10, lineHeight: 1.1 }}>
+                      {entry.athlete.first_name} {entry.athlete.last_name}
+                    </div>
+                    <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 36, fontWeight: 900, color, marginTop: 12, lineHeight: 1 }}>
+                      {formatResultWithUnit(challengeTest, entry.converted_value)}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+                      Set {new Date(entry.test_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ padding: '20px 0 8px 0', color: '#666', fontSize: 14, fontStyle: 'italic', textAlign: 'center' }}>
+                    No entries yet<br />— crown's up for grabs —
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: '#666', marginTop: 18, textAlign: 'center' }}>
+            New month, new challenge — leaderboard resets on the 1st.
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
