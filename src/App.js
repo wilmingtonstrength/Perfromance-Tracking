@@ -1172,7 +1172,6 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
         )}
       </div>
       <div style={{ height: 24 }} />
-      <BodyCompDue athletes={athletes} results={results} />
       {VOICE_AVAILABLE && (
         <VoiceCapture
           athletes={athletes}
@@ -2290,23 +2289,19 @@ const TEST_DESCRIPTIONS = {
 };
 
 function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification }) {
-  const [unlocked, setUnlocked] = useState(false);
-  const [pin, setPin] = useState('');
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [sentReports, setSentReports] = useState([]);
   const [copied, setCopied] = useState(false);
   const [minPRs, setMinPRs] = useState(5);
   const [daysBack, setDaysBack] = useState(90);
 
-  const COACH_PIN = '1234';
-
   useEffect(() => {
     const loadSent = async () => {
       const { data } = await supabase.from('progress_reports').select('*').order('sent_at', { ascending: false });
       if (data) setSentReports(data);
     };
-    if (unlocked) loadSent();
-  }, [unlocked]);
+    loadSent();
+  }, []);
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysBack);
@@ -2429,18 +2424,6 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     showNotification('Copied to clipboard!');
   };
 
-  if (!unlocked) {
-    return (
-      <div style={{ maxWidth: 400, margin: '80px auto', textAlign: 'center' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
-        <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 24, marginBottom: 8 }}>Coach Access</h2>
-        <p style={{ color: '#888', marginBottom: 24 }}>Enter PIN to access progress reports</p>
-        <input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => { setPin(e.target.value); if (e.target.value === COACH_PIN) setUnlocked(true); }} placeholder="Enter PIN" style={{ width: 200, padding: '16px 24px', background: 'rgba(0,0,0,0.3)', border: '2px solid rgba(0,212,255,0.3)', borderRadius: 12, color: '#fff', fontSize: 32, textAlign: 'center', letterSpacing: 12 }} />
-        {pin.length === 4 && pin !== COACH_PIN && <p style={{ color: '#ff6666', marginTop: 12, fontSize: 14 }}>Incorrect PIN</p>}
-      </div>
-    );
-  }
-
   if (selectedAthlete) {
     const athleteData = flaggedAthletes.find(a => a.athlete.id === selectedAthlete);
     if (!athleteData) { setSelectedAthlete(null); return null; }
@@ -2533,6 +2516,8 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
           {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
         </div>
       </div>
+
+      <BodyCompDue athletes={athletes} results={results} />
 
       {/* Quarterly Tracker */}
       {(() => {
