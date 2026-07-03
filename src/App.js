@@ -704,7 +704,7 @@ export default function App() {
       </header>
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {page === 'entry' && <TestEntryPage athletes={athletes} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
+        {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
         {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
@@ -966,8 +966,79 @@ function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestId
   );
 }
 
+/* ===================== BODY COMP DUE (Test Entry widget) ===================== */
+const BODY_COMP_TEST_IDS = ['body_weight', 'body_fat_pct', 'lean_muscle_mass'];
+const BODY_COMP_DUE_DAYS = 30; // "once a month"
+function BodyCompDue({ athletes, results }) {
+  const [open, setOpen] = useState(true);
+  const today = new Date();
+  const isActive = (a) => String(a.status || '').toLowerCase() === 'active';
+  // Tracked = active AND (adult OR explicitly flagged youth).
+  const tracked = athletes.filter(a => isActive(a) && ((a.type || 'athlete') === 'adult' || a.body_comp_tracked));
+  const rows = tracked.map(a => {
+    const dates = results
+      .filter(r => r.athlete_id === a.id && BODY_COMP_TEST_IDS.includes(r.test_id))
+      .map(r => String(r.test_date).slice(0, 10))
+      .sort();
+    const last = dates.length ? dates[dates.length - 1] : null;
+    const daysSince = last ? Math.floor((today - new Date(last + 'T00:00:00')) / 86400000) : null;
+    return { a, last, daysSince };
+  }).filter(r => r.daysSince === null || r.daysSince > BODY_COMP_DUE_DAYS)
+    .sort((x, y) => {
+      if (x.daysSince === null && y.daysSince === null) return x.a.first_name.localeCompare(y.a.first_name);
+      if (x.daysSince === null) return -1;
+      if (y.daysSince === null) return 1;
+      return y.daysSince - x.daysSince;
+    });
+
+  if (tracked.length === 0) return null;
+
+  const dueCount = rows.length;
+  const allGood = dueCount === 0;
+
+  return (
+    <div style={{ background: allGood ? 'rgba(0,255,136,0.05)' : 'rgba(255,165,0,0.07)', border: `1px solid ${allGood ? 'rgba(0,255,136,0.25)' : 'rgba(255,165,0,0.3)'}`, borderRadius: 12, marginBottom: 20, overflow: 'hidden' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', cursor: allGood ? 'default' : 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 20 }}>⚖️</span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: 1, textTransform: 'uppercase', color: allGood ? '#00ff88' : '#FFA500' }}>
+              {allGood ? 'Body Comp — all current' : `Body Comp — ${dueCount} due for testing`}
+            </div>
+            <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+              {allGood ? `${tracked.length} tracked · everyone tested within the last month` : `Tested monthly · ${tracked.length} tracked (adults + flagged youth)`}
+            </div>
+          </div>
+        </div>
+        {!allGood && <span style={{ fontSize: 13, color: '#FFA500', fontWeight: 700 }}>{open ? '▾' : '▸'}</span>}
+      </div>
+      {open && !allGood && (
+        <div style={{ maxHeight: 340, overflowY: 'auto', borderTop: '1px solid rgba(255,165,0,0.2)' }}>
+          {rows.map(({ a, last, daysSince }) => {
+            const never = daysSince === null;
+            const color = never || daysSince > 60 ? '#ff6666' : '#FFA500';
+            const isAdult = (a.type || 'athlete') === 'adult';
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>{a.first_name} {a.last_name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: isAdult ? 'rgba(255,165,0,0.2)' : 'rgba(0,212,255,0.2)', color: isAdult ? '#FFA500' : '#00d4ff' }}>{isAdult ? 'ADULT' : 'YOUTH'}</span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color }}>{never ? 'Never tested' : `${daysSince} days ago`}</div>
+                  {last && <div style={{ fontSize: 11, color: '#666' }}>last: {new Date(last + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===================== TEST ENTRY PAGE ===================== */
-function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
+function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [useKg, setUseKg] = useState(false);
@@ -1101,6 +1172,7 @@ function TestEntryPage({ athletes, logResults, getPR, getPRResult, getTestById, 
         )}
       </div>
       <div style={{ height: 24 }} />
+      <BodyCompDue athletes={athletes} results={results} />
       {VOICE_AVAILABLE && (
         <VoiceCapture
           athletes={athletes}
