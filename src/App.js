@@ -1245,7 +1245,7 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
       if (!byTest[key]) byTest[key] = { testDef: r.testDef, testName: r.test, items: [] };
       byTest[key].items.push(r);
     });
-    const valueText = (r) => r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value);
+    const valueText = (r) => formatResultWithUnit(r.testDef, r.value);
     const groups = Object.values(byTest).map(g => {
       const dir = g.testDef ? g.testDef.direction : 'higher';
       const ranked = [...g.items].sort((a, b) => dir === 'lower' ? a.value - b.value : b.value - a.value);
@@ -1679,6 +1679,8 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthle
   const [filterAthlete, setFilterAthlete] = useState(null);
   const [explorerTest, setExplorerTest] = useState('');
   const [explorerGender, setExplorerGender] = useState('all');
+  const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [sessionTest, setSessionTest] = useState('');
   const [explorerAgeMin, setExplorerAgeMin] = useState(''); const [explorerAgeMax, setExplorerAgeMax] = useState('');
   const agePresets = [['all', 'All'], ['10u', '10U'], ['12u', '12U'], ['14u', '14U'], ['15p', '15+']];
   const agePresetBounds = { all: ['', ''], '10u': ['', '10'], '12u': ['', '12'], '14u': ['', '14'], '15p': ['15', ''] };
@@ -1729,9 +1731,9 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthle
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>{view === 'recent' ? 'Recent PRs' : 'Results Explorer'}</h1>
+        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, margin: 0 }}>{view === 'recent' ? 'Recent PRs' : view === 'explorer' ? 'Results Explorer' : 'Sessions'}</h1>
         <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
-          {[['recent', 'Recent PRs'], ['explorer', 'Results Explorer']].map(([v, l]) => (
+          {[['recent', 'Recent PRs'], ['explorer', 'Results Explorer'], ['sessions', '📸 Sessions']].map(([v, l]) => (
             <button key={v} onClick={() => setView(v)} style={{ padding: '10px 20px', background: view === v ? 'rgba(0,212,255,0.2)' : 'transparent', border: 'none', borderBottom: view === v ? '2px solid #00d4ff' : '2px solid transparent', color: view === v ? '#00d4ff' : '#666', fontWeight: view === v ? 700 : 400, cursor: 'pointer', fontSize: 14 }}>{l}</button>
           ))}
         </div>
@@ -1819,6 +1821,73 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthle
           )}
         </div>
       )}
+
+      {view === 'sessions' && (() => {
+        const dayResults = results.filter(r => String(r.test_date).slice(0, 10) === sessionDate);
+        // Tests logged that day, with unique-athlete counts.
+        const testMap = {};
+        dayResults.forEach(r => { if (!testMap[r.test_id]) testMap[r.test_id] = new Set(); testMap[r.test_id].add(r.athlete_id); });
+        const testsOnDate = Object.keys(testMap).map(tid => ({ id: tid, def: getTestById(tid), count: testMap[tid].size }))
+          .filter(t => t.def).sort((a, b) => b.count - a.count);
+        // Leaderboard for the selected test: best result per athlete that day.
+        const selDef = sessionTest ? getTestById(sessionTest) : null;
+        let leaderboard = [];
+        if (selDef) {
+          const byAth = {};
+          dayResults.filter(r => r.test_id === sessionTest).forEach(r => {
+            const a = athletes.find(x => x.id === r.athlete_id); if (!a) return;
+            const val = parseFloat(r.converted_value); if (isNaN(val)) return;
+            const cur = byAth[r.athlete_id];
+            const better = !cur || (selDef.direction === 'lower' ? val < cur.value : val > cur.value);
+            if (better) byAth[r.athlete_id] = { athlete: a, value: val, raw: r.raw_value, isPR: !!r.is_pr };
+            else if (cur && r.is_pr) cur.isPR = true;
+          });
+          leaderboard = Object.values(byAth).sort((a, b) => selDef.direction === 'lower' ? a.value - b.value : b.value - a.value);
+        }
+        const dateText = new Date(sessionDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const shareIt = () => exportSessionLeaderboardImage({
+          testName: selDef.name, dateText,
+          rows: leaderboard.map(r => ({ name: `${r.athlete.first_name} ${r.athlete.last_name}`, valueText: formatResultWithUnit(selDef, r.value), isPR: r.isPR })),
+        });
+        return (
+          <div>
+            <p style={{ color: '#888', fontSize: 14, marginTop: 0, marginBottom: 20 }}>Pull up any day's testing session, ranked best-to-worst. Share the leaderboard to your story — PRs in gold with a trophy.</p>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Date</label>
+                <input type="date" value={sessionDate} onChange={(e) => { setSessionDate(e.target.value); setSessionTest(''); }} style={{ ...iStyle, fontSize: 14, colorScheme: 'dark' }} />
+              </div>
+              <div style={{ flex: '1 1 260px' }}>
+                <label style={{ display: 'block', marginBottom: 6, fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Test {testsOnDate.length > 0 ? `(${testsOnDate.length} logged this day)` : ''}</label>
+                <select value={sessionTest} onChange={(e) => setSessionTest(e.target.value)} style={{ ...iStyle, width: '100%', fontSize: 14 }}>
+                  <option value="">{testsOnDate.length ? 'Choose a test...' : 'No sessions logged this day'}</option>
+                  {testsOnDate.map(t => <option key={t.id} value={t.id}>{t.def.name} — {t.count} athlete{t.count !== 1 ? 's' : ''}</option>)}
+                </select>
+              </div>
+              {selDef && leaderboard.length > 0 && (
+                <button onClick={shareIt} style={{ padding: '12px 20px', background: 'linear-gradient(135deg, #ffd700 0%, #e0a800 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 800, fontSize: 14, cursor: 'pointer', letterSpacing: 0.5 }}>📸 Share Leaderboard</button>
+              )}
+            </div>
+            {selDef && leaderboard.length > 0 ? (
+              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+                  <h2 style={{ margin: 0, fontSize: 20, fontFamily: "'Archivo Black', sans-serif" }}>{selDef.name}</h2>
+                  <span style={{ fontSize: 13, color: '#888' }}>{dateText} · {leaderboard.length} athlete{leaderboard.length !== 1 ? 's' : ''}</span>
+                </div>
+                {leaderboard.map((r, i) => (
+                  <div key={r.athlete.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', margin: '3px 0', borderRadius: 8, background: r.isPR ? 'rgba(255,215,0,0.1)' : (i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'), borderLeft: r.isPR ? '3px solid #ffd700' : '3px solid transparent' }}>
+                    <span style={{ width: 26, textAlign: 'center', fontWeight: 800, fontSize: 15, color: r.isPR ? '#ffd700' : '#6b7a8d', fontFamily: "'Archivo Black', sans-serif" }}>{i + 1}</span>
+                    <span style={{ flex: 1, fontWeight: 700, fontSize: 16, color: r.isPR ? '#ffd700' : '#e8e8e8' }}>{r.athlete.first_name} {r.athlete.last_name}</span>
+                    <span style={{ fontWeight: 800, fontSize: 17, color: r.isPR ? '#ffd700' : '#00d4ff' }}>{r.isPR ? '🏆 ' : ''}{formatResultWithUnit(selDef, r.value)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>{testsOnDate.length ? 'Pick a test above to see the session leaderboard.' : 'No results were logged on this date. Pick another day.'}</div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
