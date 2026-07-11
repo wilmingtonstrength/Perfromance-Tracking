@@ -357,6 +357,98 @@ function exportProgressShareImage({ athleteName, testName, prText, data, directi
   }
 }
 
+// Shares a canvas as a PNG via the Web Share API (iOS: Save to Photos / post to
+// a story), falling back to a download. Must be called inside a user gesture.
+function shareCanvasPNG(canvas, fileName, title) {
+  const dataUrl = canvas.toDataURL('image/png');
+  const triggerDownload = () => { const link = document.createElement('a'); link.download = fileName; link.href = dataUrl; link.click(); };
+  let file = null;
+  try { const bin = atob(dataUrl.split(',')[1]); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); file = new File([arr], fileName, { type: 'image/png' }); } catch (e) { file = null; }
+  if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+    navigator.share({ files: [file], title }).catch((err) => { if (!err || err.name !== 'AbortError') triggerDownload(); });
+  } else {
+    triggerDownload();
+  }
+}
+
+// Builds a branded, story-sized (1080x1920) leaderboard PNG for a single test
+// session — ranked best-to-worst, PRs in gold with a trophy. "Rank, record,
+// publish." Drawn synchronously so the Web Share API stays in the user gesture.
+// rows: [{ name, valueText, isPR }] already sorted best→worst.
+function exportSessionLeaderboardImage({ testName, dateText, rows }) {
+  if (!rows || rows.length === 0) return;
+  const W = 1080, H = 1920;
+  const BLACK = '"Arial Black", Arial, sans-serif', SANS = 'Arial, sans-serif';
+  const GOLD = '#ffd700', CYAN = '#00d4ff';
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a1628'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(0,212,255,0.18)'; ctx.lineWidth = 3; roundRectPath(ctx, 40, 40, W - 80, H - 80, 32); ctx.stroke();
+
+  // Header
+  ctx.textAlign = 'center';
+  ctx.fillStyle = CYAN; ctx.font = '900 62px ' + BLACK; ctx.fillText('WILMINGTON STRENGTH', W / 2, 176);
+  ctx.fillStyle = '#9fb3c8'; ctx.font = '30px ' + SANS; ctx.fillText('PERFORMANCE TRACKING', W / 2, 228);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(170, 276); ctx.lineTo(W - 170, 276); ctx.stroke();
+
+  // Title + subtitle
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 96px ' + BLACK; ctx.fillText(String(testName || '').toUpperCase(), W / 2, 392);
+  ctx.fillStyle = CYAN; ctx.font = '40px ' + SANS;
+  const sub = [dateText, `${rows.length} ATHLETE${rows.length !== 1 ? 'S' : ''}`].filter(Boolean).join('  ·  ');
+  ctx.fillText(sub, W / 2, 456);
+
+  // Rows
+  const startY = 540, endY = 1792;
+  const availH = endY - startY;
+  const n = rows.length;
+  const rowH = Math.min(122, availH / n);
+  const nameFont = Math.max(30, Math.round(rowH * 0.36));
+  const valFont = Math.max(32, Math.round(rowH * 0.40));
+  const rankFont = Math.max(26, Math.round(rowH * 0.30));
+
+  rows.forEach((r, i) => {
+    const top = startY + i * rowH;
+    const midY = top + rowH / 2;
+    const innerY = top + 5, innerH = rowH - 10;
+    // Row background
+    if (r.isPR) {
+      ctx.fillStyle = 'rgba(255,215,0,0.13)'; roundRectPath(ctx, 70, innerY, W - 140, innerH, 16); ctx.fill();
+      ctx.fillStyle = GOLD; roundRectPath(ctx, 70, innerY, 10, innerH, 5); ctx.fill();
+    } else if (i % 2 === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.035)'; roundRectPath(ctx, 70, innerY, W - 140, innerH, 16); ctx.fill();
+    }
+    // Rank
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = r.isPR ? GOLD : '#6b7a8d'; ctx.font = '900 ' + rankFont + 'px ' + BLACK;
+    ctx.fillText(String(i + 1), 132, midY);
+    // Name (left), truncated to fit
+    ctx.textAlign = 'left';
+    ctx.fillStyle = r.isPR ? GOLD : '#ffffff'; ctx.font = '900 ' + nameFont + 'px ' + BLACK;
+    const nameX = 196, valRightX = W - 96;
+    const valStr = (r.isPR ? '🏆 ' : '') + r.valueText;
+    ctx.font = '900 ' + valFont + 'px ' + BLACK; const valW = ctx.measureText(valStr).width;
+    const nameMaxW = valRightX - valW - 44 - nameX;
+    ctx.font = '900 ' + nameFont + 'px ' + BLACK;
+    let nm = String(r.name || '');
+    if (ctx.measureText(nm).width > nameMaxW) {
+      while (nm.length > 1 && ctx.measureText(nm + '…').width > nameMaxW) nm = nm.slice(0, -1);
+      nm = nm + '…';
+    }
+    ctx.fillText(nm, nameX, midY);
+    // Value (right)
+    ctx.textAlign = 'right';
+    ctx.fillStyle = r.isPR ? GOLD : CYAN; ctx.font = '900 ' + valFont + 'px ' + BLACK;
+    ctx.fillText(valStr, valRightX, midY);
+    ctx.textBaseline = 'alphabetic';
+  });
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = CYAN; ctx.font = '28px ' + SANS; ctx.fillText('wilmington-strength-app.netlify.app', W / 2, H - 64);
+
+  const fileName = `${String(testName || 'session').replace(/\s+/g, '_')}_leaderboard.png`;
+  shareCanvasPNG(canvas, fileName, `${testName} Leaderboard`);
+}
+
 function SimpleChart({ data, direction, testDef, onPointClick }) {
   if (!data || data.length === 0) return null;
   const values = data.map(d => d.value); const minVal = Math.min(...values); const maxVal = Math.max(...values);
@@ -1144,14 +1236,52 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
 
   if (showSummary) {
-    const prResults = submittedResults.filter(r => r.isPR); const nonPRResults = submittedResults.filter(r => !r.isPR);
+    const prCount = submittedResults.filter(r => r.isPR).length;
+    // Group the session's results by test, then rank each best→worst so each
+    // test gets its own shareable leaderboard (fastest at the top).
+    const byTest = {};
+    submittedResults.forEach(r => {
+      const key = r.testDef ? r.testDef.id : r.test;
+      if (!byTest[key]) byTest[key] = { testDef: r.testDef, testName: r.test, items: [] };
+      byTest[key].items.push(r);
+    });
+    const valueText = (r) => r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value);
+    const groups = Object.values(byTest).map(g => {
+      const dir = g.testDef ? g.testDef.direction : 'higher';
+      const ranked = [...g.items].sort((a, b) => dir === 'lower' ? a.value - b.value : b.value - a.value);
+      return { ...g, ranked };
+    });
+    const dateText = new Date(String(testDate).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const shareLeaderboard = (g) => {
+      exportSessionLeaderboardImage({
+        testName: g.testName,
+        dateText,
+        rows: g.ranked.map(r => ({ name: r.athlete, valueText: valueText(r), isPR: r.isPR })),
+      });
+    };
+
     return (
       <div>
-        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Results Logged</h1>
-        <p style={{ color: '#888', marginBottom: 24 }}>{submittedResults.length} result{submittedResults.length !== 1 ? 's' : ''} saved</p>
-        {prResults.length > 0 && (<div style={{ background: 'rgba(0,255,136,0.1)', borderRadius: 12, padding: 24, border: '1px solid rgba(0,255,136,0.4)', marginBottom: 16 }}><h2 style={{ margin: '0 0 16px 0', color: '#00ff88', fontSize: 22 }}>🏆 New PRs — {prResults.length}</h2>{prResults.map((r, i) => (<div key={i} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, fontSize: 16 }}>{r.athlete} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>— {r.test}</span></span><span style={{ color: '#00ff88', fontWeight: 800, fontSize: 18 }}>{r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
-        {nonPRResults.length > 0 && (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}><h3 style={{ margin: '0 0 12px 0', color: '#aaa', fontSize: 16 }}>Other Results</h3>{nonPRResults.map((r, i) => (<div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between' }}><span><span style={{ fontWeight: 600 }}>{r.athlete}</span> — {r.test}</span><span style={{ color: '#00d4ff' }}>{r.testDef && r.testDef.convert_formula ? formatWithRaw(r.testDef, r.value, r.rawValue) : formatResultWithUnit(r.testDef, r.value)}</span></div>))}</div>)}
-        <button onClick={startNextGroup} style={{ width: '100%', padding: '20px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 2 }}>+ Start Next Group</button>
+        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Session Logged</h1>
+        <p style={{ color: '#888', marginBottom: 24 }}>{submittedResults.length} result{submittedResults.length !== 1 ? 's' : ''} · {groups.length} test{groups.length !== 1 ? 's' : ''}{prCount > 0 ? ` · 🏆 ${prCount} PR${prCount !== 1 ? 's' : ''}` : ''} · {dateText}</p>
+
+        {groups.map((g, gi) => (
+          <div key={gi} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontFamily: "'Archivo Black', sans-serif" }}>{g.testName} <span style={{ fontSize: 13, color: '#888', fontFamily: 'inherit', fontWeight: 400 }}>· {g.ranked.length}</span></h2>
+              <button onClick={() => shareLeaderboard(g)} style={{ padding: '10px 18px', background: 'linear-gradient(135deg, #ffd700 0%, #e0a800 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 800, fontSize: 14, cursor: 'pointer', letterSpacing: 0.5 }}>📸 Share Leaderboard</button>
+            </div>
+            {g.ranked.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', margin: '3px 0', borderRadius: 8, background: r.isPR ? 'rgba(255,215,0,0.1)' : (i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'), borderLeft: r.isPR ? '3px solid #ffd700' : '3px solid transparent' }}>
+                <span style={{ width: 26, textAlign: 'center', fontWeight: 800, fontSize: 15, color: r.isPR ? '#ffd700' : '#6b7a8d', fontFamily: "'Archivo Black', sans-serif" }}>{i + 1}</span>
+                <span style={{ flex: 1, fontWeight: 700, fontSize: 16, color: r.isPR ? '#ffd700' : '#e8e8e8' }}>{r.athlete}</span>
+                <span style={{ fontWeight: 800, fontSize: 17, color: r.isPR ? '#ffd700' : '#00d4ff' }}>{r.isPR ? '🏆 ' : ''}{valueText(r)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        <button onClick={startNextGroup} style={{ width: '100%', padding: '20px 32px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: 2, marginTop: 8 }}>+ Start Next Group</button>
         <p style={{ textAlign: 'center', marginTop: 12, color: '#555', fontSize: 13 }}>Need to fix an entry? Go to Athletes tab to edit or delete results.</p>
       </div>
     );
