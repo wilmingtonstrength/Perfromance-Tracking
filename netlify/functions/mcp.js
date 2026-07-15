@@ -25,10 +25,13 @@ async function loadData() {
   const tests = await testsRes.json();
   const testById = {};
   tests.forEach(t => { testById[t.id] = t; });
-  // Paginate results
+  // Athletes (for name lookup + progress queries)
+  const athRes = await fetch(`${SUPABASE_URL}/rest/v1/athletes?select=id,first_name,last_name,gender,birthday,type,status`, { headers });
+  const athletes = await athRes.json();
+  // Paginate results (keep test_date for progress-over-time)
   let all = [], from = 0;
   while (true) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/results?select=athlete_id,test_id,converted_value&limit=1000&offset=${from}`, { headers });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/results?select=athlete_id,test_id,converted_value,test_date&limit=1000&offset=${from}`, { headers });
     const batch = await res.json();
     if (!Array.isArray(batch) || batch.length === 0) break;
     all = all.concat(batch);
@@ -47,8 +50,62 @@ async function loadData() {
     if (cur === undefined) best[r.test_id][r.athlete_id] = v;
     else best[r.test_id][r.athlete_id] = t.direction === 'lower' ? Math.min(cur, v) : Math.max(cur, v);
   }
-  _cache = { tests, testById, best };
+  _cache = { tests, testById, best, athletes, results: all };
   return _cache;
+}
+
+// Resolve a name (or numeric id) to athlete records.
+function resolveAthlete(athletes, q) {
+  if (q === undefined || q === null || String(q).trim() === '') return { error: 'No athlete specified' };
+  const s = String(q).trim().toLowerCase();
+  if (/^\d+$/.test(s)) { const byId = athletes.find(a => String(a.id) === s); if (byId) return { athlete: byId }; }
+  const full = (a) => `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
+  let matches = athletes.filter(a => full(a) === s);
+  if (matches.length === 0) matches = athletes.filter(a => full(a).includes(s) || (a.first_name || '').toLowerCase() === s);
+  if (matches.length === 0) return { error: `No athlete matches "${q}". Use find_athlete to search.` };
+  if (matches.length === 1) return { athlete: matches[0] };
+  return { error: `Multiple athletes match "${q}": ${matches.map(a => `${a.first_name} ${a.last_name} (id ${a.id}, ${a.gender || '?'})`).join('; ')}. Re-ask with the full name or id.` };
+}
+
+function ageFrom(birthday) {
+  if (!birthday) return null;
+  const b = new Date(String(birthday).slice(0, 10) + 'T00:00:00');
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  return age;
+}
+
+// Per-test progress for one athlete: baseline (first recorded) -> best achieved.
+function athleteProgress(cache, athleteId) {
+  const { results, testById } = cache;
+  const byTest = {};
+  for (const r of results) {
+    if (r.athlete_id !== athleteId) continue;
+    const v = parseFloat(r.converted_value); if (isNaN(v)) continue;
+    (byTest[r.test_id] = byTest[r.test_id] || []).push({ v, date: String(r.test_date).slice(0, 10) });
+  }
+  const rows = [];
+  for (const tid of Object.keys(byTest)) {
+    const t = testById[tid]; if (!t || tid.startsWith('_')) continue;
+    const arr = byTest[tid];
+    if (arr.length < 2) continue; // need a start and at least one later point
+    arr.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    const baseline = arr[0].v, baseDate = arr[0].date;
+    let best = arr[0];
+    for (const x of arr) { if (t.direction === 'lower' ? x.v < best.v : x.v > best.v) best = x; }
+    const gain = t.direction === 'lower' ? baseline - best.v : best.v - baseline;
+    const pct = baseline !== 0 ? (gain / Math.abs(baseline)) * 100 : 0;
+    rows.push({
+      test: t.name, id: tid, direction: t.direction,
+      from: Math.round(baseline * 1000) / 1000, to: Math.round(best.v * 1000) / 1000,
+      from_date: baseDate, to_date: best.date, tests_logged: arr.length,
+      improved: gain > 0, pct_improvement: Math.round(pct * 10) / 10,
+    });
+  }
+  rows.sort((a, b) => b.pct_improvement - a.pct_improvement);
+  return rows;
 }
 
 function pearson(pairs) {
@@ -132,10 +189,56 @@ const TOOLS = [
       required: ['test'], additionalProperties: false,
     },
   },
+  {
+    name: 'find_athlete',
+    description: 'Search athletes by name (partial ok). Returns matching athletes with id, name, gender, age, and type (athlete/adult). Use this to get the exact athlete before calling athlete_progress if a name might be ambiguous.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'Full or partial athlete name.' } },
+      required: ['name'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'athlete_progress',
+    description: 'For one athlete, rank the tests they have improved in the most since they started (baseline = first recorded result, compared to their best). Returns each test with from/to values, dates, and % improvement, sorted best-improvement first. Perfect for "top metrics this athlete has improved in." Only includes tests with at least 2 results.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        athlete: { type: 'string', description: 'Athlete full name or id. If a first name is ambiguous, the tool returns the candidates so you can re-ask with the full name.' },
+        limit: { type: 'number', description: 'How many top-improved tests to return (default 4).' },
+      },
+      required: ['athlete'], additionalProperties: false,
+    },
+  },
 ];
 
 async function callTool(name, args) {
-  const { tests, best } = await loadData();
+  const cache = await loadData();
+  const { tests, best, athletes } = cache;
+  if (name === 'find_athlete') {
+    const s = String(args.name || '').trim().toLowerCase();
+    if (!s) return 'Provide a name to search.';
+    const full = (a) => `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase();
+    const matches = athletes.filter(a => full(a).includes(s) || (a.first_name || '').toLowerCase().includes(s) || (a.last_name || '').toLowerCase().includes(s));
+    if (matches.length === 0) return `No athletes found matching "${args.name}".`;
+    return JSON.stringify(matches.slice(0, 25).map(a => ({
+      id: a.id, name: `${a.first_name} ${a.last_name}`.trim(), gender: a.gender || null,
+      age: ageFrom(a.birthday), type: a.type || 'athlete', status: a.status || null,
+    })), null, 2);
+  }
+  if (name === 'athlete_progress') {
+    const ra = resolveAthlete(athletes, args.athlete);
+    if (ra.error) return ra.error;
+    const limit = args.limit != null ? args.limit : 4;
+    const rows = athleteProgress(cache, ra.athlete.id);
+    if (rows.length === 0) return `${ra.athlete.first_name} ${ra.athlete.last_name} doesn't have any tests with at least 2 results yet, so there's no progress to measure.`;
+    return JSON.stringify({
+      athlete: `${ra.athlete.first_name} ${ra.athlete.last_name}`.trim(),
+      gender: ra.athlete.gender || null, age: ageFrom(ra.athlete.birthday),
+      top_improved: rows.slice(0, limit),
+      note: 'pct_improvement is baseline(first result) → best result, direction-aware (a faster sprint or higher jump both read as positive). Values are in each test\'s stored units.',
+    }, null, 2);
+  }
   if (name === 'list_tests') {
     const rows = tests.filter(t => !t.id.startsWith('_')).map(t => `${t.id}  |  ${t.name}  |  ${t.direction}  |  ${t.category || ''}`).join('\n');
     return `Available tests (id | name | direction | category):\n${rows}`;
