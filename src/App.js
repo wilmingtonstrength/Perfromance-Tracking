@@ -70,6 +70,40 @@ const applyConversion = (testDef, rawValue) => {
   } catch { return rawValue; }
 };
 
+/* ===================== ESTIMATED 1RM ENGINE ===================== */
+// Epley for grinding strength lifts. Olympic lifts never get an estimate.
+const ORM_OLYMPIC = ['snatch', 'clean', 'jerk'];
+const ORM_MAX_REPS = 10;
+const round5 = (x) => Math.round(x / 5) * 5;
+const epley = (weight, reps) => weight * (1 + reps / 30);
+const isOlympicLift = (name) => { const n = String(name || '').toLowerCase(); return ORM_OLYMPIC.some(l => n.includes(l)); };
+
+// Returns { ok, estimated, oneRepMax (rounded for board / null), rawOneRepMax, reps, postable, message, confidence }
+const estimateOneRepMax = ({ liftName, weight, reps }) => {
+  const w = Number(weight); const r = Math.round(Number(reps));
+  if (!Number.isFinite(w) || w <= 0) return { ok: false, message: 'Enter a valid weight.' };
+  if (!Number.isFinite(r) || r < 1) return { ok: false, message: 'Enter reps of 1 or more.' };
+  if (isOlympicLift(liftName)) {
+    if (r === 1) return { ok: true, estimated: false, oneRepMax: w, rawOneRepMax: w, reps: 1, postable: true, message: 'Olympic lift — logged as a tested single.' };
+    return { ok: true, estimated: false, oneRepMax: null, reps: r, postable: false, message: 'Olympic lift — rep-max estimates don’t apply. Log a tested single (1 rep) instead.' };
+  }
+  if (r === 1) return { ok: true, estimated: false, oneRepMax: w, rawOneRepMax: w, reps: 1, postable: true, message: 'Tested single.' };
+  if (r > ORM_MAX_REPS) return { ok: true, estimated: false, oneRepMax: null, reps: r, postable: false, message: 'Over 10 reps is a volume set, not a max estimate — nothing posted to the board.' };
+  const raw = epley(w, r);
+  return { ok: true, estimated: true, oneRepMax: round5(raw), rawOneRepMax: Math.round(raw), reps: r, postable: true, confidence: r <= 5 ? 'high' : 'moderate', message: r <= 5 ? 'Heavy set — high-confidence estimate.' : 'Moderate rep set — good estimate.' };
+};
+
+// Percentage loading table off a max, mapped to the adult strength waves.
+const loadingTable = (oneRepMax) => {
+  if (!Number.isFinite(oneRepMax) || oneRepMax <= 0) return null;
+  const band = (lo, hi) => ({ low: round5(oneRepMax * lo), high: round5(oneRepMax * hi) });
+  return [
+    { name: 'Volume', reps: '8–12', pct: '65–72%', load: band(0.65, 0.72) },
+    { name: 'Load', reps: '6–8', pct: '75–80%', load: band(0.75, 0.80) },
+    { name: 'Strength', reps: '5', pct: '83–87%', load: band(0.83, 0.87) },
+  ];
+};
+
 /* ===================== MULTI-REP (RSA SHUTTLE) HELPERS ===================== */
 const isMultiRepTest = (testDef) => {
   if (!testDef) return false;
@@ -747,6 +781,29 @@ export default function App() {
     return newResults;
   };
 
+  // Log a single estimated/tested 1RM from the 1RM Logger. Posts as a normal
+  // result for the lift (so it feeds the profile + Record Board) with the
+  // estimated flag + rep context.
+  const logOneRepMax = async ({ athleteId, testId, weight, reps, convertedValue, estimated }) => {
+    const td = getTestById(testId);
+    const prev = results.filter(r => r.athlete_id === athleteId && r.test_id === testId);
+    const dir = td ? td.direction : 'higher';
+    let isPR = prev.length === 0;
+    if (!isPR) {
+      const best = dir === 'higher' ? Math.max(...prev.map(r => parseFloat(r.converted_value))) : Math.min(...prev.map(r => parseFloat(r.converted_value)));
+      isPR = dir === 'higher' ? convertedValue > best : convertedValue < best;
+    }
+    const row = { athlete_id: athleteId, test_id: testId, test_date: new Date().toISOString().split('T')[0], raw_value: weight, converted_value: convertedValue, unit: 'lbs', is_pr: isPR, estimated: !!estimated, est_reps: reps };
+    const { data, error } = await supabase.from('results').insert([row]).select();
+    if (error) { showNotification('Error logging 1RM', 'error'); return null; }
+    if (data) {
+      setResults(prev2 => [...prev2, data[0]]);
+      showNotification(isPR ? '🏆 New 1RM PR logged!' : '1RM logged!', isPR ? 'pr' : 'success');
+      return data[0];
+    }
+    return null;
+  };
+
   const getPR = (athleteId, testId) => {
     const td = getTestById(testId);
     if (!td) return null;
@@ -796,7 +853,7 @@ export default function App() {
       </header>
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
+        {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} logOneRepMax={logOneRepMax} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} />}
         {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
@@ -1129,8 +1186,128 @@ function BodyCompDue({ athletes, results }) {
   );
 }
 
+/* ===================== 1RM LOGGER (Test Entry mode) ===================== */
+function OneRepMaxLogger({ athletes, results, testDefs, getTestById, logOneRepMax }) {
+  const [athleteId, setAthleteId] = useState(null);
+  const [testId, setTestId] = useState('');
+  const [weight, setWeight] = useState('');
+  const [reps, setReps] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Strength lifts only (these are the board-eligible barbell lifts).
+  const strengthTests = (testDefs || []).filter(t => t.category === 'strength' && !String(t.id).startsWith('_'));
+  const testDef = testId ? getTestById(testId) : null;
+  const est = (testDef && weight !== '' && reps !== '') ? estimateOneRepMax({ liftName: testDef.name, weight, reps }) : null;
+  const table = est && est.ok && est.oneRepMax ? loadingTable(est.oneRepMax) : null;
+  const athlete = athleteId ? athletes.find(a => a.id === athleteId) : null;
+
+  // Recent history for this athlete + lift (trend), newest first.
+  const history = (athleteId && testId) ? results.filter(r => r.athlete_id === athleteId && r.test_id === testId)
+    .sort((a, b) => new Date(b.test_date) - new Date(a.test_date)).slice(0, 6) : [];
+
+  const canSave = est && est.ok && est.postable && est.oneRepMax && athleteId && !saving;
+  const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    await logOneRepMax({ athleteId, testId, weight: Number(weight), reps: est.reps, convertedValue: est.oneRepMax, estimated: est.estimated });
+    setSaving(false);
+    setWeight(''); setReps('');
+  };
+
+  const accent = '#00d4ff', orange = '#FFA500';
+
+  return (
+    <div>
+      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <h3 style={{ margin: '0 0 16px 0', color: accent, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Log a Working Set</h3>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Athlete / Client</label>
+          <AthleteSearchPicker athletes={athletes} value={athleteId} onChange={(id) => setAthleteId(id)} placeholder="Search athlete or adult..." />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Lift</label>
+            <select value={testId} onChange={(e) => setTestId(e.target.value)} style={{ ...iStyle, width: '100%', fontSize: 14 }}>
+              <option value="">Choose lift...</option>
+              {strengthTests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Weight (lb)</label>
+            <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} onWheel={preventScrollChange} placeholder="e.g. 225" style={{ ...iStyle, width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Reps</label>
+            <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} onWheel={preventScrollChange} placeholder="e.g. 5" style={{ ...iStyle, width: '100%' }} />
+          </div>
+        </div>
+      </div>
+
+      {est && est.ok && (
+        <div style={{ background: est.oneRepMax ? 'rgba(0,212,255,0.06)' : 'rgba(255,165,0,0.06)', borderRadius: 12, padding: 24, marginBottom: 20, border: `1px solid ${est.oneRepMax ? 'rgba(0,212,255,0.3)' : 'rgba(255,165,0,0.35)'}` }}>
+          {est.oneRepMax ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>{est.estimated ? 'Estimated 1RM' : 'Tested 1RM'}</div>
+                <div style={{ fontSize: 52, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: accent, lineHeight: 1 }}>
+                  {est.oneRepMax}<span style={{ fontSize: 22, color: '#888', fontWeight: 400 }}> lb</span>
+                  {est.estimated && <span style={{ fontSize: 15, color: orange, fontWeight: 700, marginLeft: 10, verticalAlign: 'middle' }}>EST</span>}
+                </div>
+              </div>
+              <div style={{ fontSize: 13, color: '#aaa', flex: 1, minWidth: 160 }}>{est.message}{est.estimated ? ` (${weight}×${est.reps}, Epley)` : ''}</div>
+            </div>
+          ) : (
+            <div style={{ color: orange, fontSize: 15, fontWeight: 600 }}>{est.message}</div>
+          )}
+
+          {table && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Loading Table</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                {table.map(band => (
+                  <div key={band.name} style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: 14 }}>
+                    <div style={{ fontSize: 12, color: accent, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>{band.name}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, margin: '6px 0' }}>{band.load.low}–{band.load.high} <span style={{ fontSize: 13, color: '#888', fontWeight: 400 }}>lb</span></div>
+                    <div style={{ fontSize: 12, color: '#888' }}>{band.reps} reps · {band.pct}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {canSave && (
+            <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, width: '100%', padding: '16px', background: saving ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 17, fontWeight: 800, cursor: saving ? 'wait' : 'pointer', textTransform: 'uppercase', letterSpacing: 1 }}>
+              {saving ? 'Saving...' : `Save ${est.estimated ? 'Estimated ' : ''}1RM to ${athlete ? athlete.first_name : 'athlete'}`}
+            </button>
+          )}
+          {est.oneRepMax && !athleteId && <div style={{ marginTop: 14, fontSize: 13, color: '#888', textAlign: 'center' }}>Pick an athlete above to save this to their record.</div>}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{athlete ? athlete.first_name + "'s" : ''} recent {testDef ? testDef.name : ''}</div>
+          {history.map(r => (
+            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ fontSize: 13, color: '#888' }}>{new Date(String(r.test_date).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>
+                {Math.round(parseFloat(r.converted_value))} lb
+                {r.estimated && <span style={{ fontSize: 11, color: orange, fontWeight: 700, marginLeft: 8 }}>EST</span>}
+                {r.est_reps > 1 && <span style={{ fontSize: 11, color: '#666', marginLeft: 8 }}>{Math.round(parseFloat(r.raw_value))}×{r.est_reps}</span>}
+                {r.is_pr && ' 🏆'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===================== TEST ENTRY PAGE ===================== */
-function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
+function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, getPRResult, getTestById, getTestsForType, testDefs }) {
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [useKg, setUseKg] = useState(false);
@@ -1139,6 +1316,7 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [entryMode, setEntryMode] = useState('athlete');
+  const [entryView, setEntryView] = useState('batch'); // 'batch' | 'onerm'
 
   // One-time cleanup of the old persistence key for users upgrading from the
   // previous build. Safe no-op if the key isn't there.
@@ -1297,11 +1475,20 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
           <p style={{ color: '#888', marginBottom: 0 }}>Select your tests, add athletes, enter results</p>
         </div>
-        {hasSessionState && (
+        {hasSessionState && entryView === 'batch' && (
           <button onClick={clearAll} title="Wipe current selections and athletes" style={{ padding: '10px 18px', background: 'rgba(255,100,100,0.12)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff8a8a', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Clear All</button>
         )}
       </div>
-      <div style={{ height: 24 }} />
+      <div style={{ height: 20 }} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        {[['batch', '📋 Batch Entry'], ['onerm', '🏋️ 1RM Logger']].map(([v, l]) => (
+          <button key={v} onClick={() => setEntryView(v)} style={{ padding: '10px 20px', background: entryView === v ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryView === v ? '#0a1628' : '#aaa', fontWeight: entryView === v ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{l}</button>
+        ))}
+      </div>
+      {entryView === 'onerm' ? (
+        <OneRepMaxLogger athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} logOneRepMax={logOneRepMax} />
+      ) : (
+      <>
       {VOICE_AVAILABLE && (
         <VoiceCapture
           athletes={athletes}
@@ -1390,6 +1577,8 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
         </div>
       )}
       {selectedTests.length > 0 && athleteRows.length > 0 && (<button onClick={handleSubmit} disabled={submitting} style={{ width: '100%', padding: '20px 32px', background: submitting ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: submitting ? 'wait' : 'pointer', textTransform: 'uppercase', letterSpacing: 2, boxShadow: '0 4px 20px rgba(0,255,136,0.3)' }}>{submitting ? 'Saving...' : 'Submit All Results'}</button>)}
+      </>
+      )}
     </div>
   );
 }
@@ -2320,7 +2509,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
           const val = parseFloat(r.converted_value || r.raw_value); if (isNaN(val)) return;
           const age = getAgeAtTest(a.birthday, r.test_date);
           const isMSAge = age !== null && age < 15;
-          const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val };
+          const entry = { name: `${a.first_name} ${(a.last_name || '').charAt(0)}`, value: val, estimated: !!r.estimated };
           records[test.id]['hs'].push(entry);
           if (isMSAge) records[test.id]['ms'].push(entry);
         });
@@ -2342,15 +2531,16 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
       const g = (a.gender || '').toLowerCase();
       const matches = genderFilter === 'men' ? g !== 'female' : g === 'female';
       if (!matches) return;
-      let best = null;
-      if (rollupIds) {
-        const vals = results.filter(r => r.athlete_id === a.id && rollupIds.includes(r.test_id)).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
-        if (vals.length > 0) best = Math.max(...vals);
-      } else {
-        const vals = results.filter(r => r.athlete_id === a.id && r.test_id === test.id).map(r => parseFloat(r.converted_value)).filter(v => !isNaN(v));
-        if (vals.length > 0) best = test.direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
-      }
-      if (best !== null) entries.push({ name: `${a.first_name} ${(a.last_name || '').charAt(0)}.`, value: best });
+      let best = null, bestEst = false;
+      const rows = rollupIds
+        ? results.filter(r => r.athlete_id === a.id && rollupIds.includes(r.test_id))
+        : results.filter(r => r.athlete_id === a.id && r.test_id === test.id);
+      const dirHigher = rollupIds ? true : test.direction === 'higher';
+      rows.forEach(r => {
+        const v = parseFloat(r.converted_value); if (isNaN(v)) return;
+        if (best === null || (dirHigher ? v > best : v < best)) { best = v; bestEst = !!r.estimated; }
+      });
+      if (best !== null) entries.push({ name: `${a.first_name} ${(a.last_name || '').charAt(0)}.`, value: best, estimated: bestEst });
     });
     entries.sort((a, b) => test.direction === 'higher' ? b.value - a.value : a.value - b.value);
     const seen = new Set();
@@ -2373,7 +2563,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
 
   const renderTestCard = (test, records, isTv) => {
     const hs = records[test.id]?.hs || []; const ms = records[test.id]?.ms || [];
-    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: 'linear-gradient(90deg, rgba(200,150,62,0.3) 0%, rgba(200,150,62,0.05) 100%)', borderLeft: '3px solid #C8963E' } : {}) }}><span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: i === 0 ? '#C8963E' : '#e8e8e8' }}>{formatBoardValue(test, r.value)}</span><span style={{ color: '#888', fontSize: isTv ? 12 : 13, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span></div>)) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 4 }}>—</div>;
+    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 6px', margin: '2px 0', borderRadius: 4, ...(i === 0 ? { background: 'linear-gradient(90deg, rgba(200,150,62,0.3) 0%, rgba(200,150,62,0.05) 100%)', borderLeft: '3px solid #C8963E' } : {}) }}><span style={{ fontWeight: 600, fontSize: isTv ? 13 : 14, color: i === 0 ? '#C8963E' : '#e8e8e8' }}>{formatBoardValue(test, r.value)}{r.estimated && <span style={{ fontSize: 9, color: '#FFA500', fontWeight: 700, marginLeft: 4, verticalAlign: 'top' }}>est</span>}</span><span style={{ color: '#888', fontSize: isTv ? 12 : 13, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span></div>)) : <div style={{ color: '#444', textAlign: 'center', fontSize: 13, padding: 4 }}>—</div>;
     return (<div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(255,255,255,0.1)' }}><div style={{ textAlign: 'center', fontSize: isTv ? 15 : 16, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: '2px solid #C8963E', letterSpacing: 1 }}>{test.name}</div><div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>15+</div>{renderRows(hs)}<div style={{ fontSize: 11, color: '#00d4ff', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>14 & UNDER</div>{renderRows(ms)}</div>);
   };
 
@@ -2381,7 +2571,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
 
   const renderAdultCard = (test, isTv) => {
     const men = buildAdultRecords(test, 'men'); const women = buildAdultRecords(test, 'women');
-    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (<div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', margin: '2px 0', borderRadius: 4, background: i === 0 ? 'rgba(200,150,62,0.12)' : 'transparent' }}><span style={{ fontSize: 10, fontWeight: 700, color: rankColors[i], width: 24, textAlign: 'center' }}>{rankLabels[i]}</span><span style={{ flex: 1, fontSize: isTv ? 12 : 13, color: i === 0 ? '#e8e8e8' : '#aaa', fontWeight: i === 0 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span><span style={{ fontSize: isTv ? 12 : 13, fontWeight: 700, color: rankColors[i], whiteSpace: 'nowrap' }}>{formatBoardValue(test, r.value)}{test.record_board_format === 'round' ? ' ' + (test.display_unit || test.unit) : ''}</span></div>)) : <div style={{ color: '#444', textAlign: 'center', fontSize: 12, padding: '4px 0' }}>—</div>;
+    const renderRows = (list) => list.length > 0 ? list.map((r, i) => (<div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', margin: '2px 0', borderRadius: 4, background: i === 0 ? 'rgba(200,150,62,0.12)' : 'transparent' }}><span style={{ fontSize: 10, fontWeight: 700, color: rankColors[i], width: 24, textAlign: 'center' }}>{rankLabels[i]}</span><span style={{ flex: 1, fontSize: isTv ? 12 : 13, color: i === 0 ? '#e8e8e8' : '#aaa', fontWeight: i === 0 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span><span style={{ fontSize: isTv ? 12 : 13, fontWeight: 700, color: rankColors[i], whiteSpace: 'nowrap' }}>{formatBoardValue(test, r.value)}{test.record_board_format === 'round' ? ' ' + (test.display_unit || test.unit) : ''}{r.estimated && <span style={{ fontSize: 9, color: '#FFA500', fontWeight: 700, marginLeft: 4, verticalAlign: 'top' }}>est</span>}</span></div>)) : <div style={{ color: '#444', textAlign: 'center', fontSize: 12, padding: '4px 0' }}>—</div>;
     return (<div key={test.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: isTv ? 10 : 12, border: '1px solid rgba(200,150,62,0.2)' }}><div style={{ textAlign: 'center', fontSize: isTv ? 13 : 15, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: `2px solid ${gold}`, letterSpacing: 1, textTransform: 'uppercase' }}>{test.name}</div><div style={{ fontSize: 10, color: '#FFA500', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>MEN</div>{renderRows(men)}<div style={{ fontSize: 10, color: '#FFA500', textAlign: 'center', fontWeight: 700, letterSpacing: 1, marginTop: 8, marginBottom: 4 }}>WOMEN</div>{renderRows(women)}</div>);
   };
 
