@@ -93,16 +93,9 @@ const estimateOneRepMax = ({ liftName, weight, reps }) => {
   return { ok: true, estimated: true, oneRepMax: round5(raw), rawOneRepMax: Math.round(raw), reps: r, postable: true, confidence: r <= 5 ? 'high' : 'moderate', message: r <= 5 ? 'Heavy set — high-confidence estimate.' : 'Moderate rep set — good estimate.' };
 };
 
-// Percentage loading table off a max, mapped to the adult strength waves.
-const loadingTable = (oneRepMax) => {
-  if (!Number.isFinite(oneRepMax) || oneRepMax <= 0) return null;
-  const band = (lo, hi) => ({ low: round5(oneRepMax * lo), high: round5(oneRepMax * hi) });
-  return [
-    { name: 'Volume', reps: '8–12', pct: '65–72%', load: band(0.65, 0.72) },
-    { name: 'Load', reps: '6–8', pct: '75–80%', load: band(0.75, 0.80) },
-    { name: 'Strength', reps: '5', pct: '83–87%', load: band(0.83, 0.87) },
-  ];
-};
+// True for grinding strength lifts where a rep-max estimate is valid (not
+// Olympic lifts, which are technique/speed-limited).
+const isEstimableStrength = (t) => !!t && t.category === 'strength' && !isOlympicLift(t.name);
 
 /* ===================== MULTI-REP (RSA SHUTTLE) HELPERS ===================== */
 const isMultiRepTest = (testDef) => {
@@ -766,6 +759,7 @@ export default function App() {
         isPR = td.direction === 'higher' ? result.convertedValue > best : result.convertedValue < best;
       }
       const insertRow = { athlete_id: result.athleteId, test_id: result.testId, test_date: result.testDate, raw_value: result.rawValue, converted_value: result.convertedValue, unit: result.unit, is_pr: isPR };
+      if (result.estimated) { insertRow.estimated = true; insertRow.est_reps = result.estReps; }
       if (Array.isArray(result.reps) && result.reps.length > 0) {
         insertRow.reps = result.reps;
         insertRow.best_time = result.bestTime;
@@ -779,29 +773,6 @@ export default function App() {
     if (prCount > 0) showNotification('🏆 ' + prCount + ' NEW PR' + (prCount > 1 ? 's' : '') + '! Results logged!', 'pr');
     else showNotification(resultsToLog.length + ' result' + (resultsToLog.length > 1 ? 's' : '') + ' logged!');
     return newResults;
-  };
-
-  // Log a single estimated/tested 1RM from the 1RM Logger. Posts as a normal
-  // result for the lift (so it feeds the profile + Record Board) with the
-  // estimated flag + rep context.
-  const logOneRepMax = async ({ athleteId, testId, weight, reps, convertedValue, estimated }) => {
-    const td = getTestById(testId);
-    const prev = results.filter(r => r.athlete_id === athleteId && r.test_id === testId);
-    const dir = td ? td.direction : 'higher';
-    let isPR = prev.length === 0;
-    if (!isPR) {
-      const best = dir === 'higher' ? Math.max(...prev.map(r => parseFloat(r.converted_value))) : Math.min(...prev.map(r => parseFloat(r.converted_value)));
-      isPR = dir === 'higher' ? convertedValue > best : convertedValue < best;
-    }
-    const row = { athlete_id: athleteId, test_id: testId, test_date: new Date().toISOString().split('T')[0], raw_value: weight, converted_value: convertedValue, unit: 'lbs', is_pr: isPR, estimated: !!estimated, est_reps: reps };
-    const { data, error } = await supabase.from('results').insert([row]).select();
-    if (error) { showNotification('Error logging 1RM', 'error'); return null; }
-    if (data) {
-      setResults(prev2 => [...prev2, data[0]]);
-      showNotification(isPR ? '🏆 New 1RM PR logged!' : '1RM logged!', isPR ? 'pr' : 'success');
-      return data[0];
-    }
-    return null;
   };
 
   const getPR = (athleteId, testId) => {
@@ -853,7 +824,7 @@ export default function App() {
       </header>
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} logOneRepMax={logOneRepMax} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} />}
+        {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
         {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
@@ -1186,128 +1157,8 @@ function BodyCompDue({ athletes, results }) {
   );
 }
 
-/* ===================== 1RM LOGGER (Test Entry mode) ===================== */
-function OneRepMaxLogger({ athletes, results, testDefs, getTestById, logOneRepMax }) {
-  const [athleteId, setAthleteId] = useState(null);
-  const [testId, setTestId] = useState('');
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  // Strength lifts only (these are the board-eligible barbell lifts).
-  const strengthTests = (testDefs || []).filter(t => t.category === 'strength' && !String(t.id).startsWith('_'));
-  const testDef = testId ? getTestById(testId) : null;
-  const est = (testDef && weight !== '' && reps !== '') ? estimateOneRepMax({ liftName: testDef.name, weight, reps }) : null;
-  const table = est && est.ok && est.oneRepMax ? loadingTable(est.oneRepMax) : null;
-  const athlete = athleteId ? athletes.find(a => a.id === athleteId) : null;
-
-  // Recent history for this athlete + lift (trend), newest first.
-  const history = (athleteId && testId) ? results.filter(r => r.athlete_id === athleteId && r.test_id === testId)
-    .sort((a, b) => new Date(b.test_date) - new Date(a.test_date)).slice(0, 6) : [];
-
-  const canSave = est && est.ok && est.postable && est.oneRepMax && athleteId && !saving;
-  const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
-
-  const handleSave = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    await logOneRepMax({ athleteId, testId, weight: Number(weight), reps: est.reps, convertedValue: est.oneRepMax, estimated: est.estimated });
-    setSaving(false);
-    setWeight(''); setReps('');
-  };
-
-  const accent = '#00d4ff', orange = '#FFA500';
-
-  return (
-    <div>
-      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
-        <h3 style={{ margin: '0 0 16px 0', color: accent, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Log a Working Set</h3>
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Athlete / Client</label>
-          <AthleteSearchPicker athletes={athletes} value={athleteId} onChange={(id) => setAthleteId(id)} placeholder="Search athlete or adult..." />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Lift</label>
-            <select value={testId} onChange={(e) => setTestId(e.target.value)} style={{ ...iStyle, width: '100%', fontSize: 14 }}>
-              <option value="">Choose lift...</option>
-              {strengthTests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Weight (lb)</label>
-            <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} onWheel={preventScrollChange} placeholder="e.g. 225" style={{ ...iStyle, width: '100%' }} />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#aaa' }}>Reps</label>
-            <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} onWheel={preventScrollChange} placeholder="e.g. 5" style={{ ...iStyle, width: '100%' }} />
-          </div>
-        </div>
-      </div>
-
-      {est && est.ok && (
-        <div style={{ background: est.oneRepMax ? 'rgba(0,212,255,0.06)' : 'rgba(255,165,0,0.06)', borderRadius: 12, padding: 24, marginBottom: 20, border: `1px solid ${est.oneRepMax ? 'rgba(0,212,255,0.3)' : 'rgba(255,165,0,0.35)'}` }}>
-          {est.oneRepMax ? (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>{est.estimated ? 'Estimated 1RM' : 'Tested 1RM'}</div>
-                <div style={{ fontSize: 52, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: accent, lineHeight: 1 }}>
-                  {est.oneRepMax}<span style={{ fontSize: 22, color: '#888', fontWeight: 400 }}> lb</span>
-                  {est.estimated && <span style={{ fontSize: 15, color: orange, fontWeight: 700, marginLeft: 10, verticalAlign: 'middle' }}>EST</span>}
-                </div>
-              </div>
-              <div style={{ fontSize: 13, color: '#aaa', flex: 1, minWidth: 160 }}>{est.message}{est.estimated ? ` (${weight}×${est.reps}, Epley)` : ''}</div>
-            </div>
-          ) : (
-            <div style={{ color: orange, fontSize: 15, fontWeight: 600 }}>{est.message}</div>
-          )}
-
-          {table && (
-            <div style={{ marginTop: 20 }}>
-              <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>Loading Table</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-                {table.map(band => (
-                  <div key={band.name} style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: 14 }}>
-                    <div style={{ fontSize: 12, color: accent, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>{band.name}</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, margin: '6px 0' }}>{band.load.low}–{band.load.high} <span style={{ fontSize: 13, color: '#888', fontWeight: 400 }}>lb</span></div>
-                    <div style={{ fontSize: 12, color: '#888' }}>{band.reps} reps · {band.pct}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {canSave && (
-            <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, width: '100%', padding: '16px', background: saving ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 10, color: '#0a1628', fontSize: 17, fontWeight: 800, cursor: saving ? 'wait' : 'pointer', textTransform: 'uppercase', letterSpacing: 1 }}>
-              {saving ? 'Saving...' : `Save ${est.estimated ? 'Estimated ' : ''}1RM to ${athlete ? athlete.first_name : 'athlete'}`}
-            </button>
-          )}
-          {est.oneRepMax && !athleteId && <div style={{ marginTop: 14, fontSize: 13, color: '#888', textAlign: 'center' }}>Pick an athlete above to save this to their record.</div>}
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
-          <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>{athlete ? athlete.first_name + "'s" : ''} recent {testDef ? testDef.name : ''}</div>
-          {history.map(r => (
-            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              <span style={{ fontSize: 13, color: '#888' }}>{new Date(String(r.test_date).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>
-                {Math.round(parseFloat(r.converted_value))} lb
-                {r.estimated && <span style={{ fontSize: 11, color: orange, fontWeight: 700, marginLeft: 8 }}>EST</span>}
-                {r.est_reps > 1 && <span style={{ fontSize: 11, color: '#666', marginLeft: 8 }}>{Math.round(parseFloat(r.raw_value))}×{r.est_reps}</span>}
-                {r.is_pr && ' 🏆'}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ===================== TEST ENTRY PAGE ===================== */
-function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, getPRResult, getTestById, getTestsForType, testDefs }) {
+function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
   const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTests, setSelectedTests] = useState([]);
   const [useKg, setUseKg] = useState(false);
@@ -1316,7 +1167,6 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [entryMode, setEntryMode] = useState('athlete');
-  const [entryView, setEntryView] = useState('batch'); // 'batch' | 'onerm'
 
   // One-time cleanup of the old persistence key for users upgrading from the
   // previous build. Safe no-op if the key isn't there.
@@ -1356,11 +1206,13 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
       if (prev.find(r => r.athleteId === athleteId)) return prev;
       const values = {};
       selectedTests.forEach(tid => { values[tid] = initValForTest(tid); });
-      return [...prev, { athleteId, values }];
+      return [...prev, { athleteId, values, reps: {} }];
     });
   };
   const removeAthleteRow = (index) => setAthleteRows(athleteRows.filter((_, i) => i !== index));
   const updateValue = (rowIndex, testId, value) => { const nr = [...athleteRows]; nr[rowIndex] = { ...nr[rowIndex], values: { ...nr[rowIndex].values, [testId]: value } }; setAthleteRows(nr); };
+  // Reps entered next to a strength weight → Epley estimate on submit.
+  const updateLiftReps = (rowIndex, testId, value) => { const nr = [...athleteRows]; nr[rowIndex] = { ...nr[rowIndex], reps: { ...(nr[rowIndex].reps || {}), [testId]: value } }; setAthleteRows(nr); };
   const updateRepValue = (rowIndex, testId, repIdx, value) => {
     const nr = [...athleteRows];
     const cur = Array.isArray(nr[rowIndex].values[testId]) ? [...nr[rowIndex].values[testId]] : [];
@@ -1400,6 +1252,19 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
         let raw = parseFloat(val); let cv = raw;
         if (testDef.allow_kg && useKg) { cv = Math.round(raw * 2.205); }
         if (testDef.convert_formula) cv = applyConversion(testDef, raw);
+        // Strength lift with reps entered → Epley estimated 1RM (2+ reps).
+        const repsIn = row.reps ? row.reps[testId] : '';
+        const repN = Math.round(parseFloat(repsIn));
+        if (isEstimableStrength(testDef) && Number.isFinite(repN) && repN >= 2) {
+          const weightLbs = cv; // cv already kg→lbs converted if needed
+          const e = estimateOneRepMax({ liftName: testDef.name, weight: weightLbs, reps: repN });
+          if (e.ok && e.postable && e.oneRepMax) {
+            toLog.push({ athleteId: row.athleteId, testId, testDate, rawValue: weightLbs, convertedValue: e.oneRepMax, unit: 'lbs', estimated: true, estReps: repN });
+          }
+          // reps >= 2 on a strength lift: post the estimate, or (over 10 reps)
+          // nothing at all. Never post the raw weight as a "max".
+          return;
+        }
         toLog.push({ athleteId: row.athleteId, testId, testDate, rawValue: raw, convertedValue: cv, unit: testDef.allow_kg && useKg ? 'kg' : testDef.unit });
       });
     });
@@ -1475,20 +1340,11 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Test Entry</h1>
           <p style={{ color: '#888', marginBottom: 0 }}>Select your tests, add athletes, enter results</p>
         </div>
-        {hasSessionState && entryView === 'batch' && (
+        {hasSessionState && (
           <button onClick={clearAll} title="Wipe current selections and athletes" style={{ padding: '10px 18px', background: 'rgba(255,100,100,0.12)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff8a8a', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Clear All</button>
         )}
       </div>
-      <div style={{ height: 20 }} />
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {[['batch', '📋 Batch Entry'], ['onerm', '🏋️ 1RM Logger']].map(([v, l]) => (
-          <button key={v} onClick={() => setEntryView(v)} style={{ padding: '10px 20px', background: entryView === v ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryView === v ? '#0a1628' : '#aaa', fontWeight: entryView === v ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{l}</button>
-        ))}
-      </div>
-      {entryView === 'onerm' ? (
-        <OneRepMaxLogger athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} logOneRepMax={logOneRepMax} />
-      ) : (
-      <>
+      <div style={{ height: 24 }} />
       {VOICE_AVAILABLE && (
         <VoiceCapture
           athletes={athletes}
@@ -1528,7 +1384,7 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'flex', gap: 8, padding: '0 0 8px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 8, minWidth: 'fit-content' }}>
                 <div style={{ minWidth: 140, fontSize: 12, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1 }}>Name</div>
-                {selectedTests.map(tid => { const t = getTestById(tid); const headerUnit = t && t.allow_kg && useKg ? 'kg' : ''; const colW = isMultiRepTest(t) ? 360 : ((t && t.feet_inches) ? 130 : (t && t.row_time) ? 120 : 100); return (<div key={tid} style={{ minWidth: colW, flex: 1, fontSize: 11, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t ? t.name : tid}{headerUnit && <span style={{ color: '#f0a500', display: 'block', fontSize: 10 }}>{headerUnit}</span>}{isMultiRepTest(t) && <span style={{ display: 'block', fontSize: 9, color: '#888', letterSpacing: 0, textTransform: 'none', marginTop: 2 }}>{getMultiRepCount(t)} reps · all required</span>}</div>); })}
+                {selectedTests.map(tid => { const t = getTestById(tid); const headerUnit = t && t.allow_kg && useKg ? 'kg' : ''; const colW = isMultiRepTest(t) ? 360 : ((t && t.feet_inches) ? 130 : (t && t.row_time) ? 120 : isEstimableStrength(t) ? 150 : 100); return (<div key={tid} style={{ minWidth: colW, flex: 1, fontSize: 11, color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{t ? t.name : tid}{headerUnit && <span style={{ color: '#f0a500', display: 'block', fontSize: 10 }}>{headerUnit}</span>}{isMultiRepTest(t) && <span style={{ display: 'block', fontSize: 9, color: '#888', letterSpacing: 0, textTransform: 'none', marginTop: 2 }}>{getMultiRepCount(t)} reps · all required</span>}{isEstimableStrength(t) && <span style={{ display: 'block', fontSize: 9, color: '#888', letterSpacing: 0, textTransform: 'none', marginTop: 2 }}>weight × reps → est 1RM</span>}</div>); })}
                 <div style={{ width: 32 }}></div>
               </div>
               {athleteRows.map((row, rowIndex) => {
@@ -1539,7 +1395,7 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
                     {selectedTests.map(tid => {
                       const t = getTestById(tid); const pr = getPR(row.athleteId, tid); const prR = getPRResult(row.athleteId, tid);
                       const useFtIn = t && t.feet_inches; const isRowTest = t && t.row_time; const isMR = isMultiRepTest(t);
-                      const colW = isMR ? 360 : (useFtIn ? 130 : isRowTest ? 120 : 100);
+                      const colW = isMR ? 360 : (useFtIn ? 130 : isRowTest ? 120 : isEstimableStrength(t) ? 150 : 100);
                       const prDisplay = pr !== null ? (t && t.allow_kg && useKg ? Math.round(pr / 2.205) + ' kg' : (prR && t.convert_formula ? formatWithRaw(t, pr, prR.raw_value) : formatResultWithUnit(t, pr))) : null;
                       return (<div key={tid} style={{ minWidth: colW, flex: 1 }}>
                         {isMR ? (() => {
@@ -1563,7 +1419,22 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
                               )}
                             </div>
                           );
-                        })() : useFtIn ? <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isRowTest ? <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : <input type="number" step="0.01" placeholder={t && t.allow_kg && useKg ? 'kg' : (t ? t.unit : 'val')} value={row.values[tid] || ''} onChange={(e) => updateValue(rowIndex, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />}
+                        })() : useFtIn ? <FeetInchesInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isRowTest ? <RowTimeInput value={row.values[tid]} onChange={(val) => updateValue(rowIndex, tid, val)} /> : isEstimableStrength(t) ? (() => {
+                          const inpStyle = { padding: '8px 4px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' };
+                          const repsIn = (row.reps || {})[tid] || '';
+                          const wv = parseFloat(row.values[tid]); const rv = Math.round(parseFloat(repsIn));
+                          const wLbs = (t.allow_kg && useKg && !isNaN(wv)) ? Math.round(wv * 2.205) : wv;
+                          const e = (!isNaN(wLbs) && wLbs > 0 && Number.isFinite(rv) && rv >= 2) ? estimateOneRepMax({ liftName: t.name, weight: wLbs, reps: rv }) : null;
+                          return (<div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input type="number" step="0.01" placeholder={t.allow_kg && useKg ? 'kg' : 'lb'} value={row.values[tid] || ''} onChange={(e2) => updateValue(rowIndex, tid, e2.target.value)} onWheel={preventScrollChange} style={{ ...inpStyle, flex: 1, minWidth: 0 }} />
+                              <input type="number" min="1" max="10" placeholder="reps" value={repsIn} onChange={(e2) => updateLiftReps(rowIndex, tid, e2.target.value)} onWheel={preventScrollChange} style={{ ...inpStyle, width: 48 }} />
+                            </div>
+                            {e && e.ok && e.oneRepMax && <div style={{ fontSize: 10, color: '#00ff88', textAlign: 'center', marginTop: 3 }}>= {e.oneRepMax} <span style={{ color: '#FFA500' }}>est</span></div>}
+                            {Number.isFinite(rv) && rv === 1 && <div style={{ fontSize: 10, color: '#888', textAlign: 'center', marginTop: 3 }}>tested single</div>}
+                            {Number.isFinite(rv) && rv > 10 && <div style={{ fontSize: 10, color: '#FFA500', textAlign: 'center', marginTop: 3 }}>volume — no max</div>}
+                          </div>);
+                        })() : <input type="number" step="0.01" placeholder={t && t.allow_kg && useKg ? 'kg' : (t ? t.unit : 'val')} value={row.values[tid] || ''} onChange={(e) => updateValue(rowIndex, tid, e.target.value)} onWheel={preventScrollChange} style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, textAlign: 'center' }} />}
                         {prDisplay !== null && <div style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>{isMR ? 'PR avg' : 'PR'}: {prDisplay}</div>}
                       </div>);
                     })}
@@ -1577,8 +1448,6 @@ function TestEntryPage({ athletes, results, logResults, logOneRepMax, getPR, get
         </div>
       )}
       {selectedTests.length > 0 && athleteRows.length > 0 && (<button onClick={handleSubmit} disabled={submitting} style={{ width: '100%', padding: '20px 32px', background: submitting ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 12, color: '#0a1628', fontSize: 20, fontWeight: 800, cursor: submitting ? 'wait' : 'pointer', textTransform: 'uppercase', letterSpacing: 2, boxShadow: '0 4px 20px rgba(0,255,136,0.3)' }}>{submitting ? 'Saving...' : 'Submit All Results'}</button>)}
-      </>
-      )}
     </div>
   );
 }
