@@ -258,7 +258,7 @@ function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], place
       ) : (
         <input ref={inputRef} type="text" value={search} placeholder={placeholder} onChange={(e) => { setSearch(e.target.value); setHighlightIndex(0); setIsOpen(true); }} onFocus={() => setIsOpen(true)} onKeyDown={handleKeyDown} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 8, color: '#fff', fontSize: 16, minHeight: 48 }} />
       )}
-      {isOpen && (
+      {isOpen && (!rapidAdd || search.trim().length > 0) && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: 250, overflowY: 'auto', background: '#1a2744', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, marginTop: 4, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
           {filtered.slice(0, 30).map((a, i) => (
             <div key={a.id} onClick={() => handleSelect(a)} onMouseEnter={() => setHighlightIndex(i)} style={{ padding: '10px 16px', cursor: 'pointer', background: i === highlightIndex ? 'rgba(0,212,255,0.2)' : 'transparent', color: '#fff', fontSize: 14, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -532,137 +532,11 @@ function SimpleChart({ data, direction, testDef, onPointClick }) {
   );
 }
 
-/* ===================== VOICE INPUT HELPERS ===================== */
-// Voice entry needs the MediaRecorder API (universal modern browser support)
-// plus getUserMedia (HTTPS-only). Whisper handles the recognition server-side.
-const VOICE_AVAILABLE = typeof window !== 'undefined' && !!window.MediaRecorder && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-
-const _normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-const _digitWords = { '0':'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine','10':'ten' };
-const _digitsToWords = (s) => s.replace(/\d+/g, n => _digitWords[n] || n);
-const _wordsToDigits = (s) => {
-  const map = { zero:'0', one:'1', two:'2', three:'3', four:'4', five:'5', six:'6', seven:'7', eight:'8', nine:'9', ten:'10' };
-  return s.replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, w => map[w] || w);
-};
-const _levenshtein = (a, b) => {
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  const m = Array.from({ length: b.length + 1 }, (_, i) => [i]);
-  for (let j = 0; j <= a.length; j++) m[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      m[i][j] = b[i - 1] === a[j - 1] ? m[i - 1][j - 1] : Math.min(m[i - 1][j - 1], m[i - 1][j], m[i][j - 1]) + 1;
-    }
-  }
-  return m[b.length][a.length];
-};
-
-// Find athletes named in the transcript. Returns array of athlete IDs.
-// Find athletes named in the transcript. Returns { ids, ambiguous } where
-// `ambiguous` is the set of first names that hit but were skipped because
-// multiple kids share that first name and no last name was confirmed.
-//
-// Key rule: pair-adjacency (first+last next to each other) is ONLY checked
-// against the recognizer's TOP guess, NOT the multi-alternative pool. Multi-alt
-// alternates often contain different misheard last names ("Ryan Adams" in alt 1,
-// "Ryan Kraft" in alt 2), and a substring check against the pool would match
-// BOTH Ryans even though the coach only said one.
-//
-// For ambiguous first names (multiple kids share it), the only ways to match:
-//   1. first+last next to each other in the top guess, OR
-//   2. the last name alone (and it's unique in the roster) in the top guess.
-// Multi-alt rescue is allowed for unambiguous first names — there's no other
-// athlete to confuse with.
-const findAthleteMatches = (transcript, athletes, filterType, topTranscript) => {
-  const norm = _normalize(transcript);
-  const tokens = norm.split(' ').filter(Boolean);
-  if (tokens.length === 0) return { ids: [], ambiguous: [] };
-  const normTop = _normalize(topTranscript || transcript);
-  const tokensTop = normTop.split(' ').filter(Boolean);
-
-  const pool = athletes.filter(a => !filterType || (a.type || 'athlete') === filterType);
-  const firstNameCounts = {};
-  const lastNameCounts = {};
-  pool.forEach(a => {
-    const fn = _normalize(a.first_name);
-    const ln = _normalize(a.last_name);
-    if (fn) firstNameCounts[fn] = (firstNameCounts[fn] || 0) + 1;
-    if (ln) lastNameCounts[ln] = (lastNameCounts[ln] || 0) + 1;
-  });
-
-  const tokMatch = (tok, target, tol) => tok === target || (tol > 0 && tok.length >= 3 && _levenshtein(tok, target) <= tol);
-  const hitInTokens = (toks, target, tol) => toks.some(t => tokMatch(t, target, tol));
-  const pairAdjacentIn = (toks, fn, ln, fnTol, lnTol) => {
-    if (!ln) return false;
-    for (let i = 0; i < toks.length - 1; i++) {
-      if (tokMatch(toks[i], fn, fnTol) && tokMatch(toks[i + 1], ln, lnTol)) return true;
-    }
-    return false;
-  };
-
-  const out = new Set();
-  const ambiguous = new Set();
-  pool.forEach(a => {
-    const fn = _normalize(a.first_name);
-    const ln = _normalize(a.last_name);
-    if (!fn) return;
-    const fnTol = fn.length >= 7 ? 2 : (fn.length >= 4 ? 1 : 0);
-    const lnTol = ln && ln.length >= 7 ? 2 : (ln && ln.length >= 4 ? 1 : 0);
-
-    // Strongest signal: first+last adjacent in the recognizer's TOP guess.
-    if (pairAdjacentIn(tokensTop, fn, ln, fnTol, lnTol)) { out.add(a.id); return; }
-
-    // Ambiguous first name (multiple kids share it): require pair-in-top or
-    // a unique-last-name hit in the TOP guess. No multi-alt rescue here —
-    // that's what was causing both Ryans to get added.
-    if (firstNameCounts[fn] > 1) {
-      const lnHitTop = ln && hitInTokens(tokensTop, ln, lnTol);
-      if (lnHitTop && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
-      // Skip, but if the first name was at least heard, flag for the UI hint.
-      if (hitInTokens(tokens, fn, fnTol) || hitInTokens(tokensTop, fn, fnTol)) ambiguous.add(fn);
-      return;
-    }
-
-    // Unambiguous first name — looser rules, multi-alt rescue allowed.
-    const fnHitAll = hitInTokens(tokens, fn, fnTol);
-    const lnHitAll = ln && hitInTokens(tokens, ln, lnTol);
-    if (fnHitAll && lnHitAll) { out.add(a.id); return; }
-    if (lnHitAll && ln.length >= 4 && lastNameCounts[ln] === 1) { out.add(a.id); return; }
-    if (hitInTokens(tokensTop, fn, fnTol)) { out.add(a.id); return; }
-  });
-  return { ids: Array.from(out), ambiguous: Array.from(ambiguous) };
-};
-
-// Find tests named in the transcript. Returns array of test IDs.
-// Tries multiple normalisations to handle "5-10 fly" vs "five ten fly" vs "510 fly".
-const findTestMatches = (transcript, testList) => {
-  const norm = _normalize(transcript);
-  const normD = _digitsToWords(norm);
-  const normW = _wordsToDigits(norm);
-  const out = new Set();
-  testList.forEach(t => {
-    const variants = [];
-    const baseName = _normalize(t.name || '');
-    if (baseName) {
-      variants.push(baseName);
-      variants.push(_digitsToWords(baseName));
-      variants.push(_wordsToDigits(baseName));
-    }
-    if (Array.isArray(t._aliases)) t._aliases.forEach(a => variants.push(_normalize(a)));
-    for (const v of variants) {
-      if (!v || v.length < 3) continue;
-      if (norm.includes(v) || normD.includes(v) || normW.includes(v)) {
-        out.add(t.id);
-        break;
-      }
-    }
-  });
-  return Array.from(out);
-};
-
 /* ===================== MAIN APP ===================== */
 export default function App() {
   const [page, setPage] = useState('entry');
+  // Nav starts expanded on wide screens, collapsed on phones (saves half the screen).
+  const [navOpen, setNavOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth > 900);
   const [focusAthlete, setFocusAthlete] = useState(null);
   const goToAthlete = (id) => { setFocusAthlete(id); setPage('athletes'); };
   const [athletes, setAthletes] = useState([]);
@@ -827,8 +701,16 @@ export default function App() {
             <div style={{ width: 44, height: 44, background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 22, color: '#0a1628' }}>W</div>
             <div><div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 20, letterSpacing: 1 }}>WILMINGTON STRENGTH</div><div style={{ fontSize: 11, color: '#00d4ff', letterSpacing: 2, textTransform: 'uppercase' }}>Performance Tracking</div></div>
           </div>
-          <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {navItems.map(item => (<button key={item.id} onClick={() => setPage(item.id)} style={{ padding: '10px 20px', background: page === item.id ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 6, color: page === item.id ? '#0a1628' : '#e8e8e8', fontWeight: page === item.id ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{item.label}</button>))}
+          <nav style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <button onClick={() => setNavOpen(o => !o)} style={{ padding: '10px 18px', background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.35)', borderRadius: 6, color: '#00d4ff', fontWeight: 700, cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>{(navItems.find(i => i.id === page) || {}).label || 'Menu'}</span>
+              <span style={{ fontSize: 12 }}>{navOpen ? '▲' : '▼'}</span>
+            </button>
+            {navOpen && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {navItems.map(item => (<button key={item.id} onClick={() => { setPage(item.id); if (typeof window !== 'undefined' && window.innerWidth <= 900) setNavOpen(false); }} style={{ padding: '10px 20px', background: page === item.id ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 6, color: page === item.id ? '#0a1628' : '#e8e8e8', fontWeight: page === item.id ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>{item.label}</button>))}
+              </div>
+            )}
           </nav>
         </div>
       </header>
@@ -847,251 +729,6 @@ export default function App() {
         {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
-    </div>
-  );
-}
-
-/* ===================== VOICE CAPTURE (Whisper-backed) ===================== */
-// Records mic audio via MediaRecorder, posts it to the /transcribe Netlify
-// Function which calls OpenAI Whisper. Whisper is much more accurate than the
-// browser's built-in SpeechRecognition for unusual names, and we bias it by
-// passing the roster as a prompt — so "Kraft", "Mears", "Caffee" actually
-// transcribe correctly.
-const MAX_RECORDING_MS = 60000; // safety cap
-function VoiceCapture({ athletes, testList, entryMode, rosterIds, selectedTestIds, onAddAthlete, onSelectTest, athletesById, testsById }) {
-  const [phase, setPhase] = useState('idle'); // idle | recording | transcribing
-  const [elapsed, setElapsed] = useState(0);
-  const [transcribeElapsed, setTranscribeElapsed] = useState(0);
-  const [transcript, setTranscript] = useState('');
-  const [feedback, setFeedback] = useState(null);
-  const [ambiguousNames, setAmbiguousNames] = useState([]);
-  const [error, setError] = useState(null);
-  const recorderRef = useRef(null);
-  const streamRef = useRef(null);
-  const chunksRef = useRef([]);
-  const timerRef = useRef(null);
-  const safetyTimerRef = useRef(null);
-  const transcribeTimerRef = useRef(null);
-  const mimeRef = useRef('audio/webm');
-
-  const cleanupMic = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch {} });
-      streamRef.current = null;
-    }
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
-    if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
-    recorderRef.current = null;
-  };
-
-  const processText = (text) => {
-    if (!text || !text.trim()) {
-      setError('Did not catch anything. Try again closer to the mic.');
-      return;
-    }
-    // Pre-seed seen sets so we don't try to re-add athletes/tests already on screen.
-    const seenAthletes = new Set(rosterIds || []);
-    const seenTests = new Set(selectedTestIds || []);
-    // Whisper returns one clean transcript — pass it as both args for the matcher's
-    // top-vs-pool logic (no multi-alternative noise to disambiguate).
-    const aResult = findAthleteMatches(text, athletes, entryMode, text);
-    const newAthletes = aResult.ids.filter(id => !seenAthletes.has(id));
-    newAthletes.forEach(id => onAddAthlete(id));
-    setAmbiguousNames(aResult.ambiguous);
-    const newTests = findTestMatches(text, testList).filter(id => !seenTests.has(id));
-    newTests.forEach(id => onSelectTest(id));
-    const aNames = newAthletes.map(id => { const a = athletesById(id); return a ? `${a.first_name} ${a.last_name || ''}`.trim() : id; });
-    const tNames = newTests.map(id => { const t = testsById(id); return t ? t.name : id; });
-    setFeedback({ athletes: aNames, tests: tNames });
-  };
-
-  // Generate a UUID for the transcription job. crypto.randomUUID is available
-  // on all browsers we care about (Chrome 92+, Safari 15.4+); fallback uses
-  // Math.random which is fine for a one-shot job id.
-  const newJobId = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : 'job-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-
-  const pollJob = async (jobId, deadline) => {
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 1500));
-      const res = await fetch(`/.netlify/functions/transcribe-status?id=${encodeURIComponent(jobId)}`);
-      if (!res.ok) throw new Error(`Status check failed (${res.status})`);
-      const data = await res.json();
-      if (data.status === 'done') return data.text || '';
-      if (data.status === 'error') throw new Error(data.error || 'Transcription failed');
-      // else: still pending, loop
-    }
-    throw new Error('Transcription timed out after 90s. Try a shorter recording.');
-  };
-
-  const sendToWhisper = async (blob, mimeType) => {
-    setPhase('transcribing');
-    setTranscribeElapsed(0);
-    const startedAt = Date.now();
-    if (transcribeTimerRef.current) clearInterval(transcribeTimerRef.current);
-    transcribeTimerRef.current = setInterval(() => setTranscribeElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
-    try {
-      const jobId = newJobId();
-      // Step 1: upload the audio blob straight to Supabase Storage. We can't
-      // ship the audio in the Netlify function payload — async Lambda
-      // invocations cap at 256KB, smaller than a typical recording.
-      const extension = (mimeType || '').includes('mp4') ? 'mp4'
-        : (mimeType || '').includes('ogg') ? 'ogg'
-        : 'webm';
-      const audioPath = `${jobId}.${extension}`;
-      const { error: uploadErr } = await supabase.storage
-        .from('voice-audio')
-        .upload(audioPath, blob, { contentType: mimeType || `audio/${extension}`, upsert: true });
-      if (uploadErr) throw new Error(`Audio upload failed: ${uploadErr.message}`);
-
-      const namesHint = athletes
-        .filter(a => (a.type || 'athlete') === entryMode && a.first_name)
-        .slice(0, 80)
-        .map(a => `${a.first_name} ${a.last_name || ''}`.trim())
-        .join(', ');
-      const testsHint = (testList || []).map(t => t.name).slice(0, 30).join(', ');
-
-      // Step 2: kick off the background job. Payload is tiny now — just IDs
-      // and hints. Function downloads the audio from Storage server-side.
-      const kickoff = await fetch('/.netlify/functions/transcribe-background', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, audioPath, mimeType, namesHint, testsHint }),
-      });
-      if (kickoff.status !== 202 && !kickoff.ok) {
-        const body = await kickoff.text();
-        throw new Error(`Could not start transcription (${kickoff.status}). ${body.slice(0, 200)}`);
-      }
-      // Step 3: poll until done. Function deletes the storage object when done.
-      const text = await pollJob(jobId, Date.now() + 90000);
-      setTranscript(text);
-      processText(text);
-    } catch (err) {
-      console.warn('Transcription error:', err);
-      setError(err.message || 'Transcription failed. Check your connection and try again.');
-    } finally {
-      if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
-      setPhase('idle');
-    }
-  };
-
-  const startRecording = async () => {
-    setError(null);
-    setTranscript('');
-    setFeedback(null);
-    setAmbiguousNames([]);
-    if (typeof window === 'undefined' || !navigator.mediaDevices || !window.MediaRecorder) {
-      setError('Voice recording is not supported in this browser.');
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      // Prefer webm/opus where available (Chrome/Firefox/Android). Safari produces mp4.
-      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', ''];
-      const supported = candidates.find(t => !t || (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(t)));
-      const mimeType = supported || '';
-      mimeRef.current = mimeType || 'audio/webm';
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
-      recorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: mimeRef.current });
-        cleanupMic();
-        await sendToWhisper(blob, mimeRef.current);
-      };
-      recorder.start();
-      recorderRef.current = recorder;
-      const startedAt = Date.now();
-      setElapsed(0);
-      timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250);
-      safetyTimerRef.current = setTimeout(() => { stopRecording(); }, MAX_RECORDING_MS);
-      setPhase('recording');
-    } catch (err) {
-      console.warn('getUserMedia failed:', err);
-      setError(err && err.name === 'NotAllowedError' ? 'Microphone permission was denied.' : 'Could not access the microphone.');
-      cleanupMic();
-    }
-  };
-
-  const stopRecording = () => {
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      try { recorderRef.current.stop(); } catch {}
-    } else {
-      cleanupMic();
-      setPhase('idle');
-    }
-  };
-
-  useEffect(() => () => cleanupMic(), []); // cleanup on unmount
-
-  const isRecording = phase === 'recording';
-  const isTranscribing = phase === 'transcribing';
-  const isBusy = isRecording || isTranscribing;
-  const accent = isRecording ? '#ff8a8a' : isTranscribing ? '#FFA500' : '#00d4ff';
-  const accentBg = isRecording
-    ? 'linear-gradient(135deg, #ff4d4d 0%, #cc0000 100%)'
-    : isTranscribing
-      ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)'
-      : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)';
-  const cardBg = isRecording ? 'rgba(255,80,80,0.08)' : isTranscribing ? 'rgba(255,165,0,0.08)' : 'rgba(0,212,255,0.05)';
-  const cardBorder = isRecording ? 'rgba(255,80,80,0.35)' : isTranscribing ? 'rgba(255,165,0,0.35)' : 'rgba(0,212,255,0.2)';
-
-  const handleClick = () => {
-    if (isRecording) stopRecording();
-    else if (!isTranscribing) startRecording();
-  };
-
-  const headline = isRecording ? `Recording… ${elapsed}s` : isTranscribing ? `Transcribing… ${transcribeElapsed}s` : 'Voice Entry';
-  const hint = isRecording
-    ? `Talk through your roster and tests. Tap mic to stop.${elapsed > 45 ? ` Auto-stops at 60s.` : ''}`
-    : isTranscribing
-      ? 'Whisper is processing your audio. ~5–10 seconds is normal for short clips, up to ~30s for a full 60s recording.'
-      : 'Tap mic, talk through your roster and lifts. Names and tests get added automatically.';
-
-  return (
-    <div style={{ background: cardBg, borderRadius: 12, padding: 16, marginBottom: 20, border: `1px solid ${cardBorder}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <button
-          onClick={handleClick}
-          disabled={isTranscribing}
-          style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: accentBg,
-            border: 'none', cursor: isTranscribing ? 'wait' : 'pointer', fontSize: 28, color: '#0a1628', fontWeight: 700, lineHeight: 1,
-            boxShadow: isRecording ? '0 0 0 6px rgba(255,77,77,0.25)' : '0 4px 16px rgba(0,212,255,0.3)',
-            animation: isRecording ? 'wsMicPulse 1s infinite' : 'none',
-            opacity: isTranscribing ? 0.7 : 1,
-          }}
-          aria-label={isRecording ? 'Stop recording' : 'Start voice entry'}
-        >🎤</button>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: accent, textTransform: 'uppercase', letterSpacing: 2 }}>
-            {headline}
-          </div>
-          <div style={{ fontSize: 12, color: '#888', marginTop: 6, lineHeight: 1.4 }}>{hint}</div>
-        </div>
-      </div>
-      {(transcript || feedback || ambiguousNames.length > 0 || error) && !isBusy && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          {error && <div style={{ fontSize: 13, color: '#ff8a8a', marginBottom: (transcript || feedback) ? 8 : 0 }}>{error}</div>}
-          {transcript && <div style={{ fontSize: 13, color: '#aaa', fontStyle: 'italic', marginBottom: (feedback || ambiguousNames.length > 0) ? 8 : 0 }}>"{transcript}"</div>}
-          {feedback && (feedback.athletes.length > 0 || feedback.tests.length > 0) && (
-            <div style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              {feedback.athletes.length > 0 && <span style={{ color: '#00ff88' }}>Added: <strong>{feedback.athletes.join(', ')}</strong></span>}
-              {feedback.tests.length > 0 && <span style={{ color: '#00d4ff' }}>Tests: <strong>{feedback.tests.join(', ')}</strong></span>}
-            </div>
-          )}
-          {ambiguousNames.length > 0 && (
-            <div style={{ fontSize: 13, color: '#FFA500', marginTop: feedback ? 6 : 0 }}>
-              Heard <strong>{ambiguousNames.map(n => n.charAt(0).toUpperCase() + n.slice(1)).join(', ')}</strong> — say a last name to pick the right one.
-            </div>
-          )}
-        </div>
-      )}
-      <style>{`@keyframes wsMicPulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,77,0.5); } 70% { box-shadow: 0 0 0 14px rgba(255,77,77,0); } 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); } }`}</style>
     </div>
   );
 }
@@ -1379,7 +1016,6 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
     );
   }
 
-  const flatTestList = Object.values(testSet).flat();
   const hasSessionState = selectedTests.length > 0 || athleteRows.length > 0;
 
   return (
@@ -1400,19 +1036,6 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
         </div>
       )}
       <div style={{ height: 24 }} />
-      {VOICE_AVAILABLE && (
-        <VoiceCapture
-          athletes={athletes}
-          testList={flatTestList}
-          entryMode={entryMode}
-          rosterIds={usedAthleteIds}
-          selectedTestIds={selectedTests}
-          onAddAthlete={(id) => addAthleteRow(id)}
-          onSelectTest={(id) => { if (!selectedTests.includes(id)) toggleTest(id); }}
-          athletesById={(id) => athletes.find(a => a.id === id)}
-          testsById={getTestById}
-        />
-      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button onClick={() => switchMode('athlete')} style={{ padding: '10px 24px', background: entryMode === 'athlete' ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'athlete' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'athlete' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Youth Athletes</button>
         <button onClick={() => switchMode('adult')} style={{ padding: '10px 24px', background: entryMode === 'adult' ? 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: entryMode === 'adult' ? '#0a1628' : '#aaa', fontWeight: entryMode === 'adult' ? 700 : 500, cursor: 'pointer', fontSize: 14 }}>Adult Clients</button>
