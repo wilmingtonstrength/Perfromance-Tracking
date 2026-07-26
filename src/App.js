@@ -2011,11 +2011,14 @@ const PCTL_JUMP_TESTS = [
 
 // Eccentric Utilization Ratio = countermovement (vertical) / static (squat) jump.
 // Higher = better use of the stretch-shortening cycle / eccentric capability.
+// Bands tuned for ARM-SWING testing (WS does both jumps with arms). Arm swing
+// adds height to both jumps, compressing the ratio toward 1.0, so these sit
+// lower than the hands-on-hips lab norms (which run ~1.0/1.1/1.2).
 const eurBand = (eur) => {
   if (eur == null) return { label: '—', color: '#666' };
-  if (eur < 1.00) return { label: 'Below Average', color: '#ff6666' };
-  if (eur < 1.10) return { label: 'Average', color: '#FFA500' };
-  if (eur < 1.20) return { label: 'Good', color: '#00ff88' };
+  if (eur < 0.98) return { label: 'Below Average', color: '#ff6666' };
+  if (eur < 1.06) return { label: 'Average', color: '#FFA500' };
+  if (eur < 1.12) return { label: 'Good', color: '#00ff88' };
   return { label: 'Excellent', color: '#00ffa8' };
 };
 const PCTL_COD_TESTS = [
@@ -2194,7 +2197,7 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
                   <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6 }}>
                     Vertical (CMJ) {formatPRValue('vertical_jump', vj)} ÷ Static {formatPRValue('static_jump', sj)}<br />
                     {eurPct != null && eurPool.length >= 3 ? <span style={{ color: pctlColor(eurPct) }}>{eurPct}th percentile</span> : <span style={{ color: '#666' }}>not enough peers to rank</span>}
-                    <span style={{ color: '#666' }}> · how well he reuses the countermovement</span>
+                    <span style={{ color: '#666' }}> · how well he reuses the countermovement (bands set for arm-swing testing)</span>
                   </div>
                 </div>
               ) : (
