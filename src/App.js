@@ -2004,9 +2004,20 @@ const PCTL_SPEED_TESTS = [
 ];
 const PCTL_JUMP_TESTS = [
   { id: 'vertical_jump', name: 'Vertical Jump',  dir: 'higher' },
+  { id: 'static_jump',   name: 'Static Jump',    dir: 'higher' },
   { id: 'approach_jump', name: 'Approach Jump',  dir: 'higher' },
   { id: 'broad_jump',    name: 'Broad Jump',     dir: 'higher' },
 ];
+
+// Eccentric Utilization Ratio = countermovement (vertical) / static (squat) jump.
+// Higher = better use of the stretch-shortening cycle / eccentric capability.
+const eurBand = (eur) => {
+  if (eur == null) return { label: '—', color: '#666' };
+  if (eur < 1.00) return { label: 'Below Average', color: '#ff6666' };
+  if (eur < 1.10) return { label: 'Average', color: '#FFA500' };
+  if (eur < 1.20) return { label: 'Good', color: '#00ff88' };
+  return { label: 'Excellent', color: '#00ffa8' };
+};
 const PCTL_COD_TESTS = [
   { id: '5_0_5', name: '5-0-5 Agility', dir: 'lower' },
 ];
@@ -2057,6 +2068,7 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
   const [selectedAthleteId, setSelectedAthleteId] = useState(null);
   const [byTestId, setByTestId] = useState('5_10_fly');
   const [byTestGender, setByTestGender] = useState('M');
+  const [ageWindow, setAgeWindow] = useState('all'); // 'all' | '1' | '2' | '3'
 
   const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
   const allTests = [...PCTL_SPEED_TESTS, ...PCTL_JUMP_TESTS, ...PCTL_COD_TESTS];
@@ -2075,6 +2087,23 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
       if (pr != null) pools[t.id][g].push(pr);
     }
   }
+
+  // Build a comparison pool for a test: same gender, optionally limited to
+  // athletes within ±windowN years of the reference athlete's age.
+  const windowN = ageWindow === 'all' ? null : Number(ageWindow);
+  const poolFor = (testId, g, refAge) => {
+    const vals = [];
+    for (const a of youthAthletes) {
+      if (genderOf(a) !== g) continue;
+      if (windowN != null) {
+        const aa = calculateAge(a.birthday);
+        if (aa == null || refAge == null || Math.abs(aa - refAge) > windowN) continue;
+      }
+      const v = prByAthlete[a.id] ? prByAthlete[a.id][testId] : null;
+      if (v != null) vals.push(v);
+    }
+    return vals;
+  };
 
   const formatPRValue = (testId, val) => {
     if (val == null) return '—';
@@ -2116,21 +2145,74 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
         const g = genderOf(selectedAthlete);
         const age = calculateAge(selectedAthlete.birthday);
         const cohortLabel = g === 'F' ? 'female' : 'male';
+        const compareText = windowN == null
+          ? `all ${cohortLabel} youth athletes`
+          : (age == null ? `${cohortLabel} youth (age unknown — showing all ages)` : `${cohortLabel} youth within ±${windowN} yr of age ${age}`);
+        // Eccentric Utilization Ratio = countermovement (vertical) / static jump.
+        const vj = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id].vertical_jump : null;
+        const sj = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id].static_jump : null;
+        const eur = (vj != null && sj != null && sj > 0) ? vj / sj : null;
+        const band = eurBand(eur);
+        // Gym percentile of EUR within the comparison pool.
+        const eurPool = [];
+        for (const a of youthAthletes) {
+          if (genderOf(a) !== g) continue;
+          if (windowN != null) { const aa = calculateAge(a.birthday); if (aa == null || age == null || Math.abs(aa - age) > windowN) continue; }
+          const pv = prByAthlete[a.id] ? prByAthlete[a.id].vertical_jump : null;
+          const ps = prByAthlete[a.id] ? prByAthlete[a.id].static_jump : null;
+          if (pv != null && ps != null && ps > 0) eurPool.push(pv / ps);
+        }
+        const eurPct = eur != null ? pctlRank(eur, eurPool, 'higher') : null;
         return (
           <div>
-            <div style={{ marginBottom: 24, padding: 20, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ marginBottom: 20, padding: 20, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}>
               <h2 style={{ margin: 0, fontFamily: "'Archivo Black', sans-serif", fontSize: 26 }}>{selectedAthlete.first_name} {selectedAthlete.last_name}</h2>
               <p style={{ margin: '6px 0 0 0', color: '#888', fontSize: 13 }}>
-                {selectedAthlete.gender}{age != null ? ` · ${age} yrs` : ''} · Compared against all {cohortLabel} youth athletes at the gym
+                {selectedAthlete.gender}{age != null ? ` · ${age} yrs` : ''} · Compared against {compareText}
               </p>
             </div>
+
+            {/* Age comparison toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Compare vs</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {[['all', 'All ages'], ['1', '±1 yr'], ['2', '±2 yr'], ['3', '±3 yr']].map(([v, l]) => (
+                  <button key={v} onClick={() => setAgeWindow(v)} style={{ padding: '8px 14px', background: ageWindow === v ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 6, color: ageWindow === v ? '#0a1628' : '#aaa', fontWeight: ageWindow === v ? 700 : 500, cursor: 'pointer', fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Eccentric Capability (EUR) */}
+            <div style={{ background: 'rgba(0,255,168,0.05)', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid rgba(0,255,168,0.25)' }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: 13, color: '#00ffa8', textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Eccentric Capability</h3>
+              {eur != null ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 44, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: band.color, lineHeight: 1 }}>{eur.toFixed(2)}</div>
+                    <div style={{ fontSize: 12, color: band.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 }}>{band.label}</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6 }}>
+                    Vertical (CMJ) {formatPRValue('vertical_jump', vj)} ÷ Static {formatPRValue('static_jump', sj)}<br />
+                    {eurPct != null && eurPool.length >= 3 ? <span style={{ color: pctlColor(eurPct) }}>{eurPct}th percentile</span> : <span style={{ color: '#666' }}>not enough peers to rank</span>}
+                    <span style={{ color: '#666' }}> · how well he reuses the countermovement</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: '#888' }}>
+                  Log both a <strong>Vertical Jump</strong> and a <strong>Static Jump</strong> for this athlete to unlock their eccentric score.
+                  {vj != null && sj == null && ' (Static Jump missing.)'}
+                  {vj == null && sj != null && ' (Vertical Jump missing.)'}
+                </div>
+              )}
+            </div>
+
             {PCTL_GROUPS.map(grp => (
               <div key={grp.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
                 <h3 style={{ margin: '0 0 16px 0', fontSize: 13, color: grp.accent, textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>{grp.label}</h3>
                 <div style={{ display: 'grid', gap: 14 }}>
                   {grp.tests.map(t => {
                     const pr = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id][t.id] : null;
-                    const pool = pools[t.id][g];
+                    const pool = poolFor(t.id, g, age);
                     const pct = pctlRank(pr, pool, t.dir);
                     return (
                       <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 70px 80px 60px', alignItems: 'center', gap: 12 }}>
@@ -2152,7 +2234,7 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
               </div>
             ))}
             <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>
-              Green ≥ 75th percentile · Yellow 50–74th · Red below 50th. Pool size n is the number of {cohortLabel} youth athletes who have a recorded result for that test.
+              Green ≥ 75th percentile · Yellow 50–74th · Red below 50th. Pool size n is the number of {compareText} with a recorded result for that test.{windowN != null ? ' Loosen the age window if n gets too small to be meaningful.' : ''}
             </div>
           </div>
         );
