@@ -220,18 +220,28 @@ const ADULT_PROGRAM_MONTHS = [
 ];
 
 /* ===================== SEARCH PICKER ===================== */
-function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...', filterType = null }) {
+function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], placeholder = 'Search athlete...', filterType = null, rapidAdd = false }) {
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
   const ref = React.useRef(null);
+  const inputRef = React.useRef(null);
   const selectedAthlete = athletes.find(a => a.id === value);
   const filtered = athletes
     .filter(a => (a.status === 'Active' || a.status === 'active') && !excludeIds.includes(a.id))
     .filter(a => !filterType || (a.type || 'athlete') === filterType)
     .filter(a => !search || `${a.first_name} ${a.last_name}`.toLowerCase().includes(search.toLowerCase()));
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
-  const handleSelect = (athlete) => { onChange(athlete.id); setSearch(''); setIsOpen(false); };
+  // rapidAdd: after picking a kid, clear the text but KEEP the box open + focused
+  // so you can immediately type the next name — no re-tapping, no screen jump.
+  const handleSelect = (athlete) => {
+    onChange(athlete.id); setSearch(''); setHighlightIndex(0);
+    if (rapidAdd) {
+      setIsOpen(true);
+      // Focus synchronously inside the tap gesture so iOS keeps the keyboard up.
+      if (inputRef.current) inputRef.current.focus();
+    } else { setIsOpen(false); }
+  };
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightIndex(i => Math.min(i + 1, filtered.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightIndex(i => Math.max(i - 1, 0)); }
@@ -246,7 +256,7 @@ function AthleteSearchPicker({ athletes, value, onChange, excludeIds = [], place
           <span onClick={(e) => { e.stopPropagation(); onChange(null); }} style={{ color: '#888', cursor: 'pointer', fontSize: 18 }}>×</span>
         </div>
       ) : (
-        <input type="text" value={search} placeholder={placeholder} onChange={(e) => { setSearch(e.target.value); setHighlightIndex(0); setIsOpen(true); }} onFocus={() => setIsOpen(true)} onKeyDown={handleKeyDown} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 8, color: '#fff', fontSize: 16, minHeight: 48 }} />
+        <input ref={inputRef} type="text" value={search} placeholder={placeholder} onChange={(e) => { setSearch(e.target.value); setHighlightIndex(0); setIsOpen(true); }} onFocus={() => setIsOpen(true)} onKeyDown={handleKeyDown} style={{ width: '100%', padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.5)', borderRadius: 8, color: '#fff', fontSize: 16, minHeight: 48 }} />
       )}
       {isOpen && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: 250, overflowY: 'auto', background: '#1a2744', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, marginTop: 4, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
@@ -1158,21 +1168,44 @@ function BodyCompDue({ athletes, results }) {
 }
 
 /* ===================== TEST ENTRY PAGE ===================== */
+// Persist the in-progress roster so setting up early / putting the phone down /
+// accidentally tapping another tab doesn't lose it. Auto-expires so it doesn't
+// carry a stale class into the next session.
+const TE_KEY = 'ws_testentry_v2';
+const TE_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
 function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getTestById, getTestsForType }) {
-  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedTests, setSelectedTests] = useState([]);
-  const [useKg, setUseKg] = useState(false);
-  const [athleteRows, setAthleteRows] = useState([]);
+  // Read saved state ONCE on mount, only if it's fresh (< 3h old).
+  const [saved] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(TE_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s || !s.savedAt || (Date.now() - s.savedAt) > TE_MAX_AGE_MS) { window.localStorage.removeItem(TE_KEY); return null; }
+      return s;
+    } catch { return null; }
+  });
+  const [testDate, setTestDate] = useState(() => (saved && saved.testDate) || new Date().toISOString().split('T')[0]);
+  const [selectedTests, setSelectedTests] = useState(() => (saved && Array.isArray(saved.selectedTests)) ? saved.selectedTests : []);
+  const [useKg, setUseKg] = useState(() => (saved && typeof saved.useKg === 'boolean') ? saved.useKg : false);
+  const [athleteRows, setAthleteRows] = useState(() => (saved && Array.isArray(saved.athleteRows)) ? saved.athleteRows : []);
   const [submittedResults, setSubmittedResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [entryMode, setEntryMode] = useState('athlete');
+  const [entryMode, setEntryMode] = useState(() => (saved && saved.entryMode) || 'athlete');
+  const [restored, setRestored] = useState(() => !!(saved && Array.isArray(saved.athleteRows) && saved.athleteRows.length > 0));
 
-  // One-time cleanup of the old persistence key for users upgrading from the
-  // previous build. Safe no-op if the key isn't there.
+  // One-time cleanup of the old persistence key.
+  useEffect(() => { try { window.localStorage.removeItem('ws_testentry_state_v1'); } catch {} }, []);
+
+  // Autosave on any change to the roster/setup.
   useEffect(() => {
-    try { window.localStorage.removeItem('ws_testentry_state_v1'); } catch {}
-  }, []);
+    try {
+      if (selectedTests.length === 0 && athleteRows.length === 0) { window.localStorage.removeItem(TE_KEY); return; }
+      window.localStorage.setItem(TE_KEY, JSON.stringify({ testDate, entryMode, selectedTests, useKg, athleteRows, savedAt: Date.now() }));
+    } catch {}
+  }, [testDate, entryMode, selectedTests, useKg, athleteRows]);
+
+  const clearSaved = () => { try { window.localStorage.removeItem(TE_KEY); } catch {} };
 
   const clearAll = () => {
     if (athleteRows.length === 0 && selectedTests.length === 0) return;
@@ -1180,6 +1213,8 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
     setSelectedTests([]);
     setAthleteRows([]);
     setUseKg(false);
+    setRestored(false);
+    clearSaved();
   };
 
   const testSet = getTestsForType(entryMode);
@@ -1188,6 +1223,20 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
   // Functional setState updaters so rapid voice-driven calls (multiple athletes in one
   // breath) don't clobber each other via stale closures.
   const toggleTest = (testId) => {
+    const isRemoving = selectedTests.includes(testId);
+    // Guard against an accidental tap (e.g. while scrolling) wiping data: if the
+    // test being removed already has values entered, confirm first.
+    if (isRemoving) {
+      const hasData = athleteRows.some(row => {
+        const v = row.values[testId];
+        if (Array.isArray(v)) return v.some(x => x !== '' && x != null);
+        return v !== '' && v != null && v !== undefined;
+      });
+      if (hasData) {
+        const t = getTestById(testId);
+        if (!window.confirm(`Remove ${t ? t.name : 'this test'}? Values already entered for it will be cleared.`)) return;
+      }
+    }
     setSelectedTests(prev => {
       const isAdding = !prev.includes(testId);
       setAthleteRows(rows => rows.map(row => {
@@ -1221,7 +1270,7 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
     setAthleteRows(nr);
   };
   const usedAthleteIds = athleteRows.map(r => r.athleteId);
-  const startNextGroup = () => { setAthleteRows([]); setSubmittedResults([]); setShowSummary(false); };
+  const startNextGroup = () => { setAthleteRows([]); setSubmittedResults([]); setShowSummary(false); setRestored(false); clearSaved(); };
 
   const handleSubmit = async () => {
     if (selectedTests.length === 0 || !testDate) { alert('Please select at least one test and a date'); return; }
@@ -1344,6 +1393,12 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
           <button onClick={clearAll} title="Wipe current selections and athletes" style={{ padding: '10px 18px', background: 'rgba(255,100,100,0.12)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff8a8a', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Clear All</button>
         )}
       </div>
+      {restored && hasSessionState && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', background: 'rgba(0,212,255,0.08)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 8, padding: '10px 14px', marginTop: 14 }}>
+          <span style={{ fontSize: 13, color: '#00d4ff' }}>↩︎ Picked up where you left off — {athleteRows.length} {entryMode === 'adult' ? 'client' : 'athlete'}{athleteRows.length !== 1 ? 's' : ''}, {selectedTests.length} test{selectedTests.length !== 1 ? 's' : ''}. Not this group? <strong>Clear All</strong>.</span>
+          <button onClick={() => setRestored(false)} style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 12 }}>Dismiss</button>
+        </div>
+      )}
       <div style={{ height: 24 }} />
       {VOICE_AVAILABLE && (
         <VoiceCapture
@@ -1379,7 +1434,7 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
       {selectedTests.length > 0 && (
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: '1px solid rgba(255,255,255,0.1)' }}>
           <h3 style={{ margin: '0 0 16px 0', color: entryMode === 'adult' ? '#FFA500' : '#00d4ff', fontSize: 14, textTransform: 'uppercase', letterSpacing: 2 }}>Add {entryMode === 'adult' ? 'Clients' : 'Athletes'} & Enter Results</h3>
-          <div style={{ marginBottom: 16 }}><AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => { if (id) addAthleteRow(id); }} excludeIds={usedAthleteIds} placeholder={`Search & add ${entryMode === 'adult' ? 'client' : 'athlete'}...`} filterType={entryMode} /></div>
+          <div style={{ marginBottom: 16 }}><AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => { if (id) addAthleteRow(id); }} excludeIds={usedAthleteIds} placeholder={`Type a name, tap to add — keep going...`} filterType={entryMode} rapidAdd /></div>
           {athleteRows.length > 0 && (
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'flex', gap: 8, padding: '0 0 8px 0', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 8, minWidth: 'fit-content' }}>
