@@ -2426,7 +2426,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
                 c += `<text x="40" y="${y + 42}" fill="#8a96a3" font-family="Arial,sans-serif" font-size="15">${esc(formatOldVal(pr))} → ${esc(formatVal(pr))}</text>`;
                 c += `<rect x="${barX}" y="${y + 6}" width="${barMax}" height="26" fill="rgba(255,255,255,0.05)" rx="13"/>`;
                 c += `<rect x="${barX}" y="${y + 6}" width="${bw}" height="26" fill="#00ff88" rx="13"/>`;
-                c += `<text x="${barX + barMax}" y="${y + 25}" fill="#00ff88" font-family="Arial Black,sans-serif" font-size="17" font-weight="900" text-anchor="end">+${pr.pct}%</text>`;
+                c += `<text x="${barX + barMax}" y="${y + 25}" fill="#00ff88" font-family="Arial Black,sans-serif" font-size="16" font-weight="900" text-anchor="end">${esc(improvementText(pr))}</text>`;
               });
               c += `<text x="${w / 2}" y="${h - 22}" fill="#5a6a7a" font-family="Arial,sans-serif" font-size="14" text-anchor="middle">wilmingtonstrength.com · what we test &amp; why</text>`;
               svg.innerHTML = c;
@@ -2443,7 +2443,6 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
               <div key={pr.testId} style={{ background: 'rgba(0,255,136,0.06)', borderRadius: 10, padding: '16px 20px', border: '1px solid rgba(0,255,136,0.2)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#00ff88' }}>{pr.testName}</div>
-                  {pctText(pr) && <div style={{ padding: '2px 8px', background: 'rgba(0,255,136,0.15)', borderRadius: 4, color: '#00ff88', fontSize: 13, fontWeight: 700 }}>+{pctText(pr)}</div>}
                 </div>
                 {pr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{pr.description}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
