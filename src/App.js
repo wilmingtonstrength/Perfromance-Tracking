@@ -2680,12 +2680,14 @@ function AdultProgramPage({ athletes, results, getTestById, adultPrograms }) {
     .map(p => ({ monthKey: p.month_key, label: p.label || p.month_key, warmup: (p.program && p.program.warmup) || [], movement: (p.program && p.program.movement) || {}, challenge: (p.program && p.program.challenge) || null }))
     .sort((a, b) => a.monthKey < b.monthKey ? 1 : -1);
 
-  const defaultKey = (routines.find(r => r.monthKey === currentMonthKey) || routines[0] || {}).monthKey || currentMonthKey;
+  // Default to the newest program dropped (that's the one the coach wants live),
+  // with older months a tap away in the picker.
+  const defaultKey = (routines[0] || {}).monthKey || currentMonthKey;
   const [selectedMonthKey, setSelectedMonthKey] = useState(defaultKey);
   // Once the archive loads, if the picked month isn't present, jump to the newest.
   useEffect(() => {
     if (routines.length && !routines.find(r => r.monthKey === selectedMonthKey)) {
-      setSelectedMonthKey((routines.find(r => r.monthKey === currentMonthKey) || routines[0]).monthKey);
+      setSelectedMonthKey(routines[0].monthKey);
     }
   }, [adultPrograms]); // eslint-disable-line
   const routine = routines.find(r => r.monthKey === selectedMonthKey) || null;
