@@ -2522,18 +2522,19 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes are report-ready yet.</p><p style={{ fontSize: 13 }}>An athlete shows up here once they've been testing for 3+ months and have improved on at least one test.</p></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {flaggedAthletes.map(({ athlete, prs, lastSent }) => {
+          {flaggedAthletes.map(({ athlete, prs, prCount, lastSent }) => {
             const age = calculateAge(athlete.birthday);
             const wasSent = !!lastSent;
             const sentDate = lastSent ? new Date(lastSent.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
             return (
               <div key={athlete.id} onClick={() => setSelectedAthlete(athlete.id)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', background: wasSent ? 'rgba(0,255,136,0.03)' : 'rgba(255,255,255,0.03)', borderRadius: 12, border: `1px solid ${wasSent ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.07)'}`, cursor: 'pointer' }}>
-                <div style={{ width: 48, height: 48, borderRadius: 10, background: 'rgba(0,255,136,0.15)', border: '2px solid rgba(0,255,136,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88' }}>{prs.length}</span>
+                <div style={{ width: 54, height: 54, borderRadius: 10, background: 'rgba(0,255,136,0.15)', border: '2px solid rgba(0,255,136,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: '#00ff88', lineHeight: 1 }}>{prCount}</span>
+                  <span style={{ fontSize: 8, color: '#00ff88', letterSpacing: 1, marginTop: 1 }}>PR{prCount !== 1 ? 's' : ''}</span>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{athlete.first_name} {athlete.last_name}</div>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · Improved: {prs.slice(0, 6).map(p => p.testName).join(', ')}{prs.length > 6 ? '…' : ''}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · {prCount} PR{prCount !== 1 ? 's' : ''} this quarter · improved on {prs.length} test{prs.length !== 1 ? 's' : ''}</div>
                 </div>
                 {wasSent ? (
                   <div style={{ textAlign: 'right', flexShrink: 0 }}><span style={{ fontSize: 12, color: '#00ff88', fontWeight: 600 }}>Sent {sentDate}</span></div>
