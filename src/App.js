@@ -2357,6 +2357,11 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     imps.forEach(pr => {
       msg += `• ${pr.testName}: ${formatOldVal(pr)} → ${formatVal(pr)}\n`;
     });
+    // If none of the improvements are strength lifts, explain the strength cadence.
+    const hasStrength = imps.some(pr => { const td = getTestById(pr.testId); return td && td.category === 'strength'; });
+    if (!hasStrength) {
+      msg += `\nDon't see strength numbers yet? We test strength about once a quarter, so an athlete usually needs ~5–6 months of consistent attendance before we have both a starting number and a retest to show progress. ${name}'s strength progress will show up as they keep coming in.\n`;
+    }
     msg += `\nWant the full breakdown of what each test measures and why we train it? Here's a deep dive: ${BLOG_URL}`;
     msg += `\n\nReally proud of the work ${name} is putting in — keep it up!`;
     return msg;
