@@ -538,7 +538,10 @@ export default function App() {
   // Nav starts expanded on wide screens, collapsed on phones (saves half the screen).
   const [navOpen, setNavOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth > 900);
   const [focusAthlete, setFocusAthlete] = useState(null);
-  const goToAthlete = (id) => { setFocusAthlete(id); setPage('athletes'); };
+  const [focusTest, setFocusTest] = useState(null);
+  const [athletesReferrer, setAthletesReferrer] = useState(null);
+  const goToAthlete = (id) => { setFocusTest(null); setAthletesReferrer(null); setFocusAthlete(id); setPage('athletes'); };
+  const goToAthleteChart = (id, testId) => { setFocusTest(testId || null); setAthletesReferrer('recentprs'); setFocusAthlete(id); setPage('athletes'); };
   const [athletes, setAthletes] = useState([]);
   const [results, setResults] = useState([]);
   const [testDefs, setTestDefs] = useState([]);
@@ -717,13 +720,13 @@ export default function App() {
       {notification && (<div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', padding: '16px 32px', background: notification.type === 'pr' ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', borderRadius: 8, color: '#0a1628', fontWeight: 700, fontSize: 16, zIndex: 1000, boxShadow: '0 10px 40px rgba(0,212,255,0.3)' }}>{notification.message}</div>)}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
         {page === 'entry' && <TestEntryPage athletes={athletes} results={results} logResults={logResults} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} />}
-        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} clearFocusAthlete={() => setFocusAthlete(null)} />}
-        {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} />}
+        {page === 'athletes' && <AthletesPage athletes={athletes} addAthlete={addAthlete} updateAthlete={updateAthlete} deleteAthlete={deleteAthlete} results={results} getPR={getPR} getPRResult={getPRResult} getTestById={getTestById} getTestsForType={getTestsForType} testDefs={testDefs} deleteResult={deleteResult} updateResult={updateResult} getAssessment={getAssessment} saveAssessment={saveAssessment} focusAthlete={focusAthlete} focusTest={focusTest} referrer={athletesReferrer} onReturnToReferrer={() => { setAthletesReferrer(null); setFocusTest(null); setPage('recentprs'); }} clearFocusAthlete={() => { setFocusAthlete(null); setFocusTest(null); }} />}
+        {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} onSelectResult={goToAthleteChart} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} getTestById={getTestById} />}
         {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
-        {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} />}
+        {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} onSelectAthlete={goToAthlete} />}
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
         {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
         {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} />}
@@ -1061,8 +1064,9 @@ function TestEntryPage({ athletes, results, logResults, getPR, getPRResult, getT
 }
 
 /* ===================== COMBINED ATHLETES PAGE ===================== */
-function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult, getAssessment, saveAssessment, focusAthlete, clearFocusAthlete }) {
+function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, results, getPR, getPRResult, getTestById, getTestsForType, testDefs, deleteResult, updateResult, getAssessment, saveAssessment, focusAthlete, focusTest, referrer, onReturnToReferrer, clearFocusAthlete }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
+  const [fromReferrer, setFromReferrer] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingInfo, setEditingInfo] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1088,7 +1092,7 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
   const startEditInfo = () => { if (!athlete) return; setFirstName(athlete.first_name); setLastName(athlete.last_name); setBirthday(athlete.birthday ? String(athlete.birthday).slice(0, 10) : ''); setGender(athlete.gender || 'Male'); setEmail(athlete.email || ''); setPhone(athlete.phone || ''); setStatus(athlete.status || 'Active'); setType(athlete.type || 'athlete'); setEditingInfo(true); };
   const saveEditInfo = () => { updateAthlete(selectedAthlete, { firstName, lastName, birthday, gender, email, phone, status, type }); setEditingInfo(false); };
   const handleSelectAthlete = (id) => { setSelectedAthlete(id); setEditingInfo(false); setProfileTab('prs'); setSelectedTest(''); setChartStart(''); setChartEnd(''); setEditingResult(null); setHistoryFilter(''); };
-  useEffect(() => { if (focusAthlete) { handleSelectAthlete(focusAthlete); if (clearFocusAthlete) clearFocusAthlete(); window.scrollTo(0, 0); } }, [focusAthlete]);
+  useEffect(() => { if (focusAthlete) { handleSelectAthlete(focusAthlete); if (focusTest) { setProfileTab('progress'); setSelectedTest(focusTest); } setFromReferrer(!!referrer); if (clearFocusAthlete) clearFocusAthlete(); window.scrollTo(0, 0); } }, [focusAthlete]);
   const handleEditResult = (r) => { setEditingResult(r.id); setEditDate(String(r.test_date).slice(0, 10)); setEditValue(String(r.raw_value)); };
   const handleSaveResult = (r) => { updateResult(r.id, { testId: r.test_id, testDate: editDate, rawValue: parseFloat(editValue) }); setEditingResult(null); };
   const filteredAthletes = athletes.filter(a => { const nm = !searchTerm || (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase()); const tm = filterType === 'all' || (a.type || 'athlete') === filterType; return nm && tm; });
@@ -1133,14 +1137,18 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {filteredAthletes.map(a => { const ar = results.filter(r => r.athlete_id === a.id); const prs = ar.filter(r => r.is_pr).length; const age = calculateAge(a.birthday); const isAd = a.type === 'adult'; return (
-            <div key={a.id} onClick={() => handleSelectAthlete(a.id)} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `1px solid ${isAd ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}>
+            <div key={a.id} onClick={() => { setFromReferrer(false); handleSelectAthlete(a.id); }} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `1px solid ${isAd ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}><div><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}><h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>{isAd && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}</div><p style={{ margin: '4px 0 0 0', color: '#888', fontSize: 14 }}>{age && (age + ' yrs')}{a.gender && (' · ' + a.gender)}</p></div><span style={{ padding: '4px 10px', background: (a.status === 'Active' || a.status === 'active') ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.1)', color: (a.status === 'Active' || a.status === 'active') ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{a.status}</span></div>
               <div style={{ marginTop: 16, display: 'flex', gap: 24 }}><div><div style={{ fontSize: 24, fontWeight: 700, color: '#00d4ff' }}>{ar.length}</div><div style={{ fontSize: 12, color: '#888' }}>Tests</div></div><div><div style={{ fontSize: 24, fontWeight: 700, color: '#00ff88' }}>{prs}</div><div style={{ fontSize: 12, color: '#888' }}>PRs</div></div></div>
             </div>); })}
         </div>
       </>)}
       {athlete && (<div>
-        <button onClick={() => { setSelectedAthlete(null); setEditingInfo(false); }} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+        {fromReferrer && onReturnToReferrer ? (
+          <button onClick={() => { setFromReferrer(false); onReturnToReferrer(); }} style={{ padding: '8px 16px', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 20 }}>← Back to Recent PRs</button>
+        ) : (
+          <button onClick={() => { setSelectedAthlete(null); setEditingInfo(false); }} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+        )}
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, marginBottom: 24, border: `1px solid ${isAdult ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}` }}>
           {editingInfo ? (<div><h3 style={{ margin: '0 0 16px 0', color: '#00d4ff' }}>Edit Info</h3><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}><input type="text" placeholder="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} style={iStyle} /><input type="text" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} style={iStyle} /><div><label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#888' }}>Birthday</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={{ width: '100%', ...iStyle }} /></div><select value={gender} onChange={(e) => setGender(e.target.value)} style={iStyle}><option>Male</option><option>Female</option></select><select value={status} onChange={(e) => setStatus(e.target.value)} style={iStyle}><option>Active</option><option>Inactive</option></select><select value={type} onChange={(e) => setType(e.target.value)} style={iStyle}><option value="athlete">Youth Athlete</option><option value="adult">Adult Client</option></select></div><div style={{ marginTop: 16, display: 'flex', gap: 12 }}><button onClick={saveEditInfo} style={{ padding: '10px 24px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer' }}>Save</button><button onClick={() => setEditingInfo(false)} style={{ padding: '10px 24px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button></div></div>
           ) : (<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: 16 }}><div><div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}><h2 style={{ margin: 0, fontSize: 28, fontFamily: "'Archivo Black', sans-serif" }}>{athlete.first_name} {athlete.last_name}</h2>{isAdult && <span style={{ fontSize: 12, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '3px 10px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}</div><p style={{ margin: 0, color: '#888', fontSize: 14 }}>{calculateAge(athlete.birthday) && (calculateAge(athlete.birthday) + ' yrs')}{athlete.gender && (' · ' + athlete.gender)}{' · ' + athleteResults.length + ' tests'}{' · ' + athleteResults.filter(r => r.is_pr).length + ' PRs'}</p></div><div style={{ display: 'flex', gap: 8 }}><button onClick={startEditInfo} style={{ padding: '8px 16px', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 6, color: '#00d4ff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Edit Info</button><button onClick={() => { deleteAthlete(athlete.id, `${athlete.first_name} ${athlete.last_name}`); setSelectedAthlete(null); }} style={{ padding: '8px 16px', background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.3)', borderRadius: 6, color: '#ff6666', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Delete</button></div></div>)}
@@ -1338,11 +1346,15 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
 }
 
 /* ===================== RECENT PRS + RESULTS EXPLORER ===================== */
-function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthlete }) {
-  const [view, setView] = useState('recent');
-  const [timeFrame, setTimeFrame] = useState('week');
-  const [filterTest, setFilterTest] = useState('');
-  const [filterAthlete, setFilterAthlete] = useState(null);
+// Remembers the Recent PRs filter selections so they survive a round-trip to an
+// athlete's chart and back — lets the coach click through kids without re-filtering.
+const recentPRsMemory = { view: 'recent', timeFrame: 'week', filterTest: '', filterAthlete: null };
+function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthlete, onSelectResult }) {
+  const [view, setView] = useState(recentPRsMemory.view);
+  const [timeFrame, setTimeFrame] = useState(recentPRsMemory.timeFrame);
+  const [filterTest, setFilterTest] = useState(recentPRsMemory.filterTest);
+  const [filterAthlete, setFilterAthlete] = useState(recentPRsMemory.filterAthlete);
+  useEffect(() => { recentPRsMemory.view = view; recentPRsMemory.timeFrame = timeFrame; recentPRsMemory.filterTest = filterTest; recentPRsMemory.filterAthlete = filterAthlete; }, [view, timeFrame, filterTest, filterAthlete]);
   const [explorerTest, setExplorerTest] = useState('');
   const [explorerGender, setExplorerGender] = useState('all');
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
@@ -1414,7 +1426,7 @@ function RecentPRsPage({ athletes, results, getTestById, testDefs, onSelectAthle
             <div><label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: '#aaa' }}>Filter by Test</label><select value={filterTest} onChange={(e) => setFilterTest(e.target.value)} style={{ ...iStyle, width: 220 }}><option value="">All Tests</option>{testDefs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
             <div style={{ padding: '12px 20px', background: 'rgba(0,255,136,0.15)', borderRadius: 8, color: '#00ff88', fontWeight: 700, fontSize: 18 }}>{recentPRs.length} PR{recentPRs.length !== 1 ? 's' : ''}</div>
           </div>
-          {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a && onSelectAthlete ? (<span onClick={() => onSelectAthlete(a.id)} style={{ cursor: 'pointer', color: '#00d4ff', textDecoration: 'underline', textDecorationColor: 'rgba(0,212,255,0.4)' }}>{`${a.first_name} ${a.last_name}`}</span>) : (a ? `${a.first_name} ${a.last_name}` : 'Unknown')}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div><div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div></div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
+          {recentPRs.length > 0 ? (<div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>{recentPRs.map((r) => { const a = athletes.find(x => x.id === r.athlete_id); const t = getTestById(r.test_id); const age = a ? calculateAge(a.birthday) : null; const dateStr = new Date(r.test_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); const isAdult = a && a.type === 'adult'; return (<div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: 16 }}><div style={{ fontSize: 24 }}>🏆</div><div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>{a && onSelectAthlete ? (<span onClick={() => onSelectAthlete(a.id)} style={{ cursor: 'pointer', color: '#00d4ff', textDecoration: 'underline', textDecorationColor: 'rgba(0,212,255,0.4)' }}>{`${a.first_name} ${a.last_name}`}</span>) : (a ? `${a.first_name} ${a.last_name}` : 'Unknown')}{isAdult && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '1px 6px', borderRadius: 8, fontWeight: 600 }}>ADULT</span>}</div><div style={{ color: '#888', fontSize: 13 }}>{age && `${age} yrs · `}{t?.name} · {dateStr}</div></div>{(a && onSelectResult) ? (<div onClick={() => onSelectResult(r.athlete_id, r.test_id)} title="View progress chart" style={{ fontSize: 22, fontWeight: 800, color: '#00ff88', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'underline', textDecorationColor: 'rgba(0,255,136,0.4)' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}<span style={{ fontSize: 14 }}>📈</span></div>) : (<div style={{ fontSize: 22, fontWeight: 800, color: '#00ff88' }}>{t ? (t.convert_formula ? formatWithRaw(t, r.converted_value, r.raw_value) : formatResultWithUnit(t, r.converted_value)) : r.converted_value}</div>)}</div>); })}</div>) : (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No PRs in the selected time frame.</p></div>)}
         </div>
       )}
 
@@ -2239,7 +2251,7 @@ const TEST_DESCRIPTIONS = {
   'sl_rsi_right': 'single-leg ground contact (right)',
 };
 
-function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification }) {
+function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNotification, onSelectAthlete }) {
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [sentReports, setSentReports] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -2338,12 +2350,12 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     const imps = athleteData.improvements;
     const prc = athleteData.prCount;
     const name = a.first_name;
+    const sinceLabel = athleteData.firstDate ? ` (${athleteData.firstDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})` : '';
     let msg = `Hey! Quick quarterly progress update on ${name}. `;
     if (prc > 0) msg += `Over the last 3 months ${name} set ${prc} new personal record${prc !== 1 ? 's' : ''}. `;
-    msg += `Here's how far ${name} has come since day one:\n\n`;
+    msg += `Here's how far ${name} has come since we started tracking${sinceLabel}:\n\n`;
     imps.forEach(pr => {
-      const pctPart = pr.pct >= 1 ? ` (+${pr.pct}%)` : '';
-      msg += `• ${pr.testName}: ${formatOldVal(pr)} → ${formatVal(pr)}${pctPart}\n`;
+      msg += `• ${pr.testName}: ${formatOldVal(pr)} → ${formatVal(pr)}\n`;
     });
     msg += `\nWant the full breakdown of what each test measures and why we train it? Here's a deep dive: ${BLOG_URL}`;
     msg += `\n\nReally proud of the work ${name} is putting in — keep it up!`;
@@ -2385,7 +2397,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         <button onClick={() => setSelectedAthlete(null)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, margin: 0 }}>{athleteData.athlete.first_name} {athleteData.athlete.last_name}</h2>
+            <h2 onClick={onSelectAthlete ? () => onSelectAthlete(athleteData.athlete.id) : undefined} style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, margin: 0, ...(onSelectAthlete ? { cursor: 'pointer', color: '#00d4ff', textDecoration: 'underline', textDecorationColor: 'rgba(0,212,255,0.4)' } : {}) }} title={onSelectAthlete ? 'Open profile' : undefined}>{athleteData.athlete.first_name} {athleteData.athlete.last_name}</h2>
             <p style={{ color: '#888', margin: '4px 0' }}>{age && `${age} yrs`}{athleteData.athlete.gender && ` · ${athleteData.athlete.gender}`} · {athleteData.prCount} PR{athleteData.prCount !== 1 ? 's' : ''} in last 3 months · improved on {athleteData.improvements.length} test{athleteData.improvements.length !== 1 ? 's' : ''}{athleteData.firstDate ? ` · since ${athleteData.firstDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : ''}</p>
           </div>
           {wasSent && <span style={{ padding: '6px 14px', background: 'rgba(0,255,136,0.15)', borderRadius: 6, color: '#00ff88', fontSize: 13, fontWeight: 600 }}>Previously sent</span>}
@@ -2406,7 +2418,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
               c += `<rect x="6" y="6" width="${w - 12}" height="${h - 12}" fill="none" stroke="rgba(0,212,255,0.18)" stroke-width="2" rx="16"/>`;
               c += `<text x="40" y="52" fill="#00d4ff" font-family="Arial Black,sans-serif" font-size="30" font-weight="900">WILMINGTON STRENGTH</text>`;
               c += `<text x="40" y="86" fill="#fff" font-family="Arial Black,sans-serif" font-size="34" font-weight="900">${esc(athleteData.athlete.first_name + ' ' + athleteData.athlete.last_name)}</text>`;
-              c += `<text x="40" y="118" fill="#8a96a3" font-family="Arial,sans-serif" font-size="18">Progress since day one${athleteData.prCount > 0 ? ` · ${athleteData.prCount} PR${athleteData.prCount !== 1 ? 's' : ''} this quarter` : ''}</text>`;
+              c += `<text x="40" y="118" fill="#8a96a3" font-family="Arial,sans-serif" font-size="18">Progress since we started tracking${athleteData.prCount > 0 ? ` · ${athleteData.prCount} PR${athleteData.prCount !== 1 ? 's' : ''} this quarter` : ''}</text>`;
               rows.forEach((pr, i) => {
                 const y = padTop + i * rowH;
                 const bw = Math.max(6, Math.round((pr.pct / maxPct) * barMax));
