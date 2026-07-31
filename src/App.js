@@ -546,6 +546,7 @@ export default function App() {
   const [results, setResults] = useState([]);
   const [testDefs, setTestDefs] = useState([]);
   const [assessments, setAssessments] = useState([]);
+  const [adultPrograms, setAdultPrograms] = useState([]);
   const [notification, setNotification] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -575,6 +576,8 @@ export default function App() {
     setResults(allResults);
     const { data: asmts } = await supabase.from('athlete_assessments').select('*');
     if (asmts) setAssessments(asmts);
+    const { data: aprogs } = await supabase.from('adult_programs').select('*').order('month_key', { ascending: false });
+    if (aprogs) setAdultPrograms(aprogs);
     setLoading(false);
   };
 
@@ -729,7 +732,7 @@ export default function App() {
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} onSelectAthlete={goToAthlete} />}
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
         {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
-        {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} />}
+        {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} adultPrograms={adultPrograms} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -2667,14 +2670,29 @@ function MphClubPage({ athletes, results }) {
    leaderboard (top male + top female for the challenge test, filtered to
    results recorded THIS month, adult category only). Auto-swaps to the next
    month's routine on the 1st via ADULT_PROGRAM_MONTHS lookup. */
-function AdultProgramPage({ athletes, results, getTestById }) {
+function AdultProgramPage({ athletes, results, getTestById, adultPrograms }) {
   const now = new Date();
-  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const routine = ADULT_PROGRAM_MONTHS.find(r => r.monthKey === monthKey);
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  // Only compute the leaderboard for the routine's month — if we're mid-August
-  // and only July is defined we don't want August results appearing under it.
+  // Archive → selectable months (newest first). The app gates on a global
+  // loading state, so adultPrograms is already populated by the time this renders.
+  const routines = (adultPrograms || [])
+    .map(p => ({ monthKey: p.month_key, label: p.label || p.month_key, warmup: (p.program && p.program.warmup) || [], movement: (p.program && p.program.movement) || {}, challenge: (p.program && p.program.challenge) || null }))
+    .sort((a, b) => a.monthKey < b.monthKey ? 1 : -1);
+
+  const defaultKey = (routines.find(r => r.monthKey === currentMonthKey) || routines[0] || {}).monthKey || currentMonthKey;
+  const [selectedMonthKey, setSelectedMonthKey] = useState(defaultKey);
+  // Once the archive loads, if the picked month isn't present, jump to the newest.
+  useEffect(() => {
+    if (routines.length && !routines.find(r => r.monthKey === selectedMonthKey)) {
+      setSelectedMonthKey((routines.find(r => r.monthKey === currentMonthKey) || routines[0]).monthKey);
+    }
+  }, [adultPrograms]); // eslint-disable-line
+  const routine = routines.find(r => r.monthKey === selectedMonthKey) || null;
+  const monthLabel = routine ? routine.label : now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const isPastMonth = routine && routine.monthKey < currentMonthKey;
+
+  // Challenge leaderboard for the SELECTED month's window.
   let topMale = null;
   let topFemale = null;
   let challengeTest = null;
@@ -2726,8 +2744,8 @@ function AdultProgramPage({ athletes, results, getTestById }) {
           <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40 }}>{monthLabel}</h1>
         </div>
         <div style={{ ...cardBase, textAlign: 'center', padding: 48, border: `1px dashed rgba(255,165,0,0.3)` }}>
-          <div style={{ fontSize: 15, color: '#aaa', marginBottom: 6 }}>No program dropped for this month yet.</div>
-          <div style={{ fontSize: 12, color: '#666' }}>Ask Claude to add {monthLabel} to ADULT_PROGRAM_MONTHS in src/App.js.</div>
+          <div style={{ fontSize: 15, color: '#aaa', marginBottom: 6 }}>No program saved for {monthLabel} yet.</div>
+          <div style={{ fontSize: 12, color: '#666' }}>{routines.length > 0 ? 'Use the month picker to view a saved month.' : 'Ask Claude to add this month’s program.'}</div>
         </div>
       </div>
     );
@@ -2760,31 +2778,57 @@ function AdultProgramPage({ athletes, results, getTestById }) {
           </div>
         </div>
 
-        {/* Movement */}
+        {/* Movement — supports two shapes: A/B day-splits (`days`) or supersets (`blocks`) */}
         <div style={{ ...cardBase, padding: cardPad, background: 'rgba(0,212,255,0.05)', border: `1px solid rgba(0,212,255,0.25)` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isTv ? 22 : 20, flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ ...sectionLabel, fontSize: labelFont, color: cyan }}>Movement</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isTv ? 18 : 16, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ ...sectionLabel, fontSize: labelFont, color: cyan }}>{Array.isArray(routine.movement.days) ? 'Athletic Menu' : 'Movement'}</div>
             {routine.movement.rounds && (
               <div style={{ fontSize: isTv ? 16 : 12, color: '#bbb', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{routine.movement.rounds}</div>
             )}
           </div>
-          <div style={{ display: 'grid', gap: isTv ? 16 : 18 }}>
-            {routine.movement.blocks.map((block) => (
-              <div key={block.label}>
-                <div style={{ fontSize: mvBlockLabel, color: cyan, fontWeight: 800, letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Block {block.label}</div>
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {block.exercises.map((e, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: mvPad, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
-                      <div style={{ fontSize: isTv ? 18 : 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: isTv ? 40 : 28, textAlign: 'center', paddingTop: 2 }}>{block.label}{block.exercises.length > 1 ? i + 1 : ''}</div>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: mvName }}>{e.name}</div>
-                        {e.detail && <div style={{ fontSize: mvDetail, color: '#bbb', marginTop: 3 }}>{e.detail}</div>}
+          {routine.movement.note && (
+            <div style={{ fontSize: isTv ? 15 : 12, color: '#9fb3c8', lineHeight: 1.5, marginBottom: isTv ? 18 : 16, padding: isTv ? '12px 14px' : '10px 12px', background: 'rgba(0,0,0,0.18)', borderRadius: 8, borderLeft: `3px solid ${cyan}` }}>{routine.movement.note}</div>
+          )}
+          <div style={{ display: 'grid', gap: isTv ? 18 : 18 }}>
+            {Array.isArray(routine.movement.days) ? (
+              routine.movement.days.map((day) => (
+                <div key={day.label}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: isTv ? 20 : 15, color: cyan, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", letterSpacing: 1 }}>{day.label}</span>
+                    {day.schedule && <span style={{ fontSize: isTv ? 14 : 11, color: '#8a96a3', letterSpacing: 1 }}>{day.schedule}</span>}
+                    {day.rounds && <span style={{ fontSize: isTv ? 14 : 11, color: '#bbb', fontWeight: 700, textTransform: 'uppercase', marginLeft: 'auto' }}>{day.rounds}</span>}
+                  </div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {day.exercises.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: mvPad, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                        <div style={{ fontSize: isTv ? 18 : 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: isTv ? 34 : 22, textAlign: 'center', paddingTop: 2 }}>{i + 1}</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: mvName }}>{e.name}</div>
+                          {e.detail && <div style={{ fontSize: mvDetail, color: '#bbb', marginTop: 3 }}>{e.detail}</div>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              (routine.movement.blocks || []).map((block) => (
+                <div key={block.label}>
+                  <div style={{ fontSize: mvBlockLabel, color: cyan, fontWeight: 800, letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Block {block.label}</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {block.exercises.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: mvPad, background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                        <div style={{ fontSize: isTv ? 18 : 12, color: cyan, fontWeight: 800, fontFamily: "'Archivo Black', sans-serif", minWidth: isTv ? 40 : 28, textAlign: 'center', paddingTop: 2 }}>{block.label}{block.exercises.length > 1 ? i + 1 : ''}</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: mvName }}>{e.name}</div>
+                          {e.detail && <div style={{ fontSize: mvDetail, color: '#bbb', marginTop: 3 }}>{e.detail}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -2796,6 +2840,7 @@ function AdultProgramPage({ athletes, results, getTestById }) {
             <div>
               <div style={{ ...sectionLabel, color: gold, fontSize: isTv ? 13 : 12 }}>🏆 Challenge of the Month</div>
               <h2 style={{ margin: '6px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: chTitle, letterSpacing: 1 }}>{challengeTest.name}</h2>
+              {routine.challenge.note && <div style={{ fontSize: isTv ? 14 : 12, color: '#c8b06a', marginTop: 4 }}>{routine.challenge.note}</div>}
             </div>
             {!isTv && (
               <div style={{ fontSize: 11, color: '#888', textAlign: 'right' }}>
@@ -2869,10 +2914,17 @@ function AdultProgramPage({ athletes, results, getTestById }) {
       {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 28 }}>
         <div>
-          <div style={{ ...sectionLabel, color: orange }}>Adult Program</div>
+          <div style={{ ...sectionLabel, color: orange }}>Adult Program{isPastMonth ? ' · Archived' : ''}</div>
           <h1 style={{ margin: '4px 0 0 0', fontFamily: "'Archivo Black', sans-serif", fontSize: 40, letterSpacing: 1 }}>{routine.label}</h1>
         </div>
-        <button onClick={() => setTvMode(true)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 6, color: '#0a1628', cursor: 'pointer', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>TV Mode</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {routines.length > 1 && (
+            <select value={selectedMonthKey} onChange={(e) => setSelectedMonthKey(e.target.value)} style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,165,0,0.4)', borderRadius: 6, color: '#fff', fontSize: 14, fontWeight: 600 }}>
+              {routines.map(r => <option key={r.monthKey} value={r.monthKey}>{r.label}{r.monthKey === currentMonthKey ? ' (current)' : ''}</option>)}
+            </select>
+          )}
+          <button onClick={() => setTvMode(true)} style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 6, color: '#0a1628', cursor: 'pointer', fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>TV Mode</button>
+        </div>
       </div>
       {renderBody(false)}
     </div>
