@@ -733,76 +733,6 @@ export default function App() {
   );
 }
 
-/* ===================== BODY COMP DUE (Test Entry widget) ===================== */
-const BODY_COMP_TEST_IDS = ['body_weight', 'body_fat_pct', 'lean_muscle_mass'];
-const BODY_COMP_DUE_DAYS = 30; // "once a month"
-function BodyCompDue({ athletes, results }) {
-  const [open, setOpen] = useState(true);
-  const today = new Date();
-  const isActive = (a) => String(a.status || '').toLowerCase() === 'active';
-  // Tracked = active AND (adult OR explicitly flagged youth).
-  const tracked = athletes.filter(a => isActive(a) && ((a.type || 'athlete') === 'adult' || a.body_comp_tracked));
-  const rows = tracked.map(a => {
-    const dates = results
-      .filter(r => r.athlete_id === a.id && BODY_COMP_TEST_IDS.includes(r.test_id))
-      .map(r => String(r.test_date).slice(0, 10))
-      .sort();
-    const last = dates.length ? dates[dates.length - 1] : null;
-    const daysSince = last ? Math.floor((today - new Date(last + 'T00:00:00')) / 86400000) : null;
-    return { a, last, daysSince };
-  }).filter(r => r.daysSince === null || r.daysSince > BODY_COMP_DUE_DAYS)
-    .sort((x, y) => {
-      if (x.daysSince === null && y.daysSince === null) return x.a.first_name.localeCompare(y.a.first_name);
-      if (x.daysSince === null) return -1;
-      if (y.daysSince === null) return 1;
-      return y.daysSince - x.daysSince;
-    });
-
-  if (tracked.length === 0) return null;
-
-  const dueCount = rows.length;
-  const allGood = dueCount === 0;
-
-  return (
-    <div style={{ background: allGood ? 'rgba(0,255,136,0.05)' : 'rgba(255,165,0,0.07)', border: `1px solid ${allGood ? 'rgba(0,255,136,0.25)' : 'rgba(255,165,0,0.3)'}`, borderRadius: 12, marginBottom: 20, overflow: 'hidden' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', cursor: allGood ? 'default' : 'pointer' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 20 }}>⚖️</span>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: 1, textTransform: 'uppercase', color: allGood ? '#00ff88' : '#FFA500' }}>
-              {allGood ? 'Body Comp — all current' : `Body Comp — ${dueCount} due for testing`}
-            </div>
-            <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-              {allGood ? `${tracked.length} tracked · everyone tested within the last month` : `Tested monthly · ${tracked.length} tracked (adults + flagged youth)`}
-            </div>
-          </div>
-        </div>
-        {!allGood && <span style={{ fontSize: 13, color: '#FFA500', fontWeight: 700 }}>{open ? '▾' : '▸'}</span>}
-      </div>
-      {open && !allGood && (
-        <div style={{ maxHeight: 340, overflowY: 'auto', borderTop: '1px solid rgba(255,165,0,0.2)' }}>
-          {rows.map(({ a, last, daysSince }) => {
-            const never = daysSince === null;
-            const color = never || daysSince > 60 ? '#ff6666' : '#FFA500';
-            const isAdult = (a.type || 'athlete') === 'adult';
-            return (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{a.first_name} {a.last_name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: isAdult ? 'rgba(255,165,0,0.2)' : 'rgba(0,212,255,0.2)', color: isAdult ? '#FFA500' : '#00d4ff' }}>{isAdult ? 'ADULT' : 'YOUTH'}</span>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color }}>{never ? 'Never tested' : `${daysSince} days ago`}</div>
-                  {last && <div style={{ fontSize: 11, color: '#666' }}>last: {new Date(last + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ===================== TEST ENTRY PAGE ===================== */
 // Persist the in-progress roster so setting up early / putting the phone down /
@@ -2537,8 +2467,6 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
           {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
         </div>
       </div>
-
-      <BodyCompDue athletes={athletes} results={results} />
 
       {/* Quarterly Tracker */}
       {(() => {
