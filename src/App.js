@@ -2243,8 +2243,6 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [sentReports, setSentReports] = useState([]);
   const [copied, setCopied] = useState(false);
-  const [minPRs, setMinPRs] = useState(5);
-  const [daysBack, setDaysBack] = useState(90);
 
   useEffect(() => {
     const loadSent = async () => {
@@ -2254,56 +2252,54 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     loadSent();
   }, []);
 
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+  const BLOG_URL = 'https://wilmingtonstrength.com/post/what-we-test-and-why';
+  const QUARTER_DAYS = 90; // "last 3 months"
+  const quarterCutoff = new Date(); quarterCutoff.setDate(quarterCutoff.getDate() - QUARTER_DAYS);
+  const asDate = (d) => new Date(String(d).slice(0, 10) + 'T00:00:00');
 
-  const getRecentPRs = (athleteId) => {
-    const athleteResults = results.filter(r => r.athlete_id === athleteId);
-    const testIds = [...new Set(athleteResults.map(r => r.test_id))];
-    const prsByTest = {};
-    testIds.forEach(testId => {
-      const td = getTestById(testId);
-      if (!td) return;
-      const vals = athleteResults.filter(ar => ar.test_id === testId)
-        .map(tr => ({ date: tr.test_date, value: parseFloat(tr.converted_value), raw: parseFloat(tr.raw_value) }))
-        .filter(v => !isNaN(v.value))
-        .sort((a, b) => new Date(a.date) - new Date(b.date));
-      if (vals.length < 2) return;
-      const latest = vals[vals.length - 1];
-      if (new Date(latest.date) < cutoffDate) return;
-      // Find the baseline: the earliest entry in the reporting window,
-      // or the most recent entry before the window as a starting point.
-      // This captures FULL progress over the period (e.g. 25.5 -> 29.0, not 28.0 -> 29.0)
-      let baseline = null;
-      // First, try to find the most recent entry BEFORE the cutoff (the true starting point)
-      for (let i = vals.length - 2; i >= 0; i--) {
-        if (new Date(vals[i].date) < cutoffDate) { baseline = vals[i]; break; }
-      }
-      // If no entry before cutoff, use the earliest entry in the window
-      if (!baseline) baseline = vals[0];
-      // Skip ties: no improvement means nothing to report (e.g. 1.4 to 1.4)
-      const diff = Math.abs(latest.value - baseline.value);
-      if (diff < 0.001) return;
-      const improved = td.direction === 'higher' ? latest.value > baseline.value : latest.value < baseline.value;
-      if (!improved) return;
-      // Skip improvements under 5% — not worth reporting to parents
-      const pctChange = baseline.value !== 0 ? Math.round(Math.abs(latest.value - baseline.value) / Math.abs(baseline.value) * 100) : 0;
-      if (pctChange < 5) return;
-      // Only report if latest is actually the all-time best (a real PR)
-      const best = td.direction === 'higher' ? Math.max(...vals.map(v => v.value)) : Math.min(...vals.map(v => v.value));
-      if (latest.value === best) {
-        prsByTest[testId] = { testId, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: baseline.value, newValue: latest.value, date: latest.date, description: TEST_DESCRIPTIONS[testId] || '', feetInches: td.feet_inches, convertFormula: td.convert_formula, oldRaw: baseline.raw, newRaw: latest.raw };
-      }
+  // When the athlete "started" = their first recorded test date.
+  const firstTestDate = (athleteId) => {
+    const dates = results.filter(r => r.athlete_id === athleteId).map(r => r.test_date).filter(Boolean).map(d => String(d).slice(0, 10)).sort();
+    return dates.length ? asDate(dates[0]) : null;
+  };
+  // PRs set in the last quarter.
+  const recentPRCount = (athleteId) => results.filter(r => r.athlete_id === athleteId && r.is_pr && asDate(r.test_date) >= quarterCutoff).length;
+
+  // Every test improved SINCE THE ATHLETE STARTED: first recorded value -> best.
+  const improvementsSinceStart = (athleteId) => {
+    const byTest = {};
+    results.filter(r => r.athlete_id === athleteId).forEach(r => {
+      const v = parseFloat(r.converted_value); if (isNaN(v)) return;
+      (byTest[r.test_id] = byTest[r.test_id] || []).push({ date: String(r.test_date).slice(0, 10), value: v, raw: parseFloat(r.raw_value) });
     });
-    return Object.values(prsByTest);
+    const out = [];
+    Object.keys(byTest).forEach(testId => {
+      const td = getTestById(testId); if (!td || String(testId).startsWith('_')) return;
+      const arr = byTest[testId]; if (arr.length < 2) return;
+      arr.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+      const first = arr[0];
+      let best = arr[0];
+      for (const x of arr) { if (td.direction === 'higher' ? x.value > best.value : x.value < best.value) best = x; }
+      const improved = td.direction === 'higher' ? best.value > first.value : best.value < first.value;
+      if (!improved) return;
+      const pct = first.value !== 0 ? Math.round(Math.abs(best.value - first.value) / Math.abs(first.value) * 100) : 0;
+      out.push({ testId, testName: td.name, direction: td.direction, unit: td.display_unit || td.unit, oldValue: first.value, newValue: best.value, oldRaw: first.raw, newRaw: best.raw, feetInches: td.feet_inches, convertFormula: td.convert_formula, startDate: first.date, bestDate: best.date, pct, description: TEST_DESCRIPTIONS[testId] || '' });
+    });
+    out.sort((a, b) => b.pct - a.pct);
+    return out;
   };
 
-  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete');
+  // Eligible = active youth, first test 3+ months ago, improved on at least one test.
+  const youthAthletes = athletes.filter(a => (a.type || 'athlete') === 'athlete' && (a.status === 'Active' || a.status === 'active'));
   const flaggedAthletes = youthAthletes.map(a => {
-    const prs = getRecentPRs(a.id);
+    const first = firstTestDate(a.id);
+    const improvements = improvementsSinceStart(a.id);
+    const prCount = recentPRCount(a.id);
     const lastSent = sentReports.find(sr => sr.athlete_id === a.id);
-    return { athlete: a, prs, lastSent };
-  }).filter(a => a.prs.length >= minPRs).sort((a, b) => b.prs.length - a.prs.length);
+    const eligible = !!first && first <= quarterCutoff && improvements.length >= 1;
+    // `prs` kept as an alias so existing render code (formatVal etc.) works.
+    return { athlete: a, prs: improvements, improvements, prCount, firstDate: first, eligible, lastSent };
+  }).filter(a => a.eligible).sort((a, b) => (b.prCount - a.prCount) || (b.improvements.length - a.improvements.length));
 
   const formatVal = (pr) => {
     if (pr.feetInches) return formatFeetInches(pr.newValue);
@@ -2339,16 +2335,18 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
 
   const generateMessage = (athleteData) => {
     const a = athleteData.athlete;
-    const prs = athleteData.prs;
+    const imps = athleteData.improvements;
+    const prc = athleteData.prCount;
     const name = a.first_name;
-    let msg = `Hey! Just wanted to give you a quick progress update on ${name}. Over the last few months ${name} has been putting in great work and it's showing:\n\n`;
-    prs.forEach(pr => {
-      const desc = pr.description ? ` (${pr.description})` : '';
-      const pct = pctText(pr);
-      const pctPart = pct ? `, that's up ${pct} from last test` : '';
-      msg += `${pr.testName}: ${formatVal(pr)}, up from ${formatOldVal(pr)}${pctPart}${desc}\n`;
+    let msg = `Hey! Quick quarterly progress update on ${name}. `;
+    if (prc > 0) msg += `Over the last 3 months ${name} set ${prc} new personal record${prc !== 1 ? 's' : ''}. `;
+    msg += `Here's how far ${name} has come since day one:\n\n`;
+    imps.forEach(pr => {
+      const pctPart = pr.pct >= 1 ? ` (+${pr.pct}%)` : '';
+      msg += `• ${pr.testName}: ${formatOldVal(pr)} → ${formatVal(pr)}${pctPart}\n`;
     });
-    msg += `\n${name} is making real progress. Keep up the great work!`;
+    msg += `\nWant the full breakdown of what each test measures and why we train it? Here's a deep dive: ${BLOG_URL}`;
+    msg += `\n\nReally proud of the work ${name} is putting in — keep it up!`;
     return msg;
   };
 
@@ -2356,8 +2354,8 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     const msg = generateMessage(athleteData);
     const { data, error } = await supabase.from('progress_reports').insert([{
       athlete_id: athleteData.athlete.id,
-      pr_count: athleteData.prs.length,
-      pr_summary: athleteData.prs.map(p => p.testName).join(', '),
+      pr_count: athleteData.prCount,
+      pr_summary: athleteData.improvements.map(p => p.testName).join(', '),
       message_text: msg,
     }]).select();
     if (data) {
@@ -2388,30 +2386,38 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
           <div>
             <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, margin: 0 }}>{athleteData.athlete.first_name} {athleteData.athlete.last_name}</h2>
-            <p style={{ color: '#888', margin: '4px 0' }}>{age && `${age} yrs`}{athleteData.athlete.gender && ` · ${athleteData.athlete.gender}`} · {athleteData.prs.length} PRs in last {daysBack} days</p>
+            <p style={{ color: '#888', margin: '4px 0' }}>{age && `${age} yrs`}{athleteData.athlete.gender && ` · ${athleteData.athlete.gender}`} · {athleteData.prCount} PR{athleteData.prCount !== 1 ? 's' : ''} in last 3 months · improved on {athleteData.improvements.length} test{athleteData.improvements.length !== 1 ? 's' : ''}{athleteData.firstDate ? ` · since ${athleteData.firstDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}` : ''}</p>
           </div>
           {wasSent && <span style={{ padding: '6px 14px', background: 'rgba(0,255,136,0.15)', borderRadius: 6, color: '#00ff88', fontSize: 13, fontWeight: 600 }}>Previously sent</span>}
         </div>
 
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>PR Improvements</h3>
+            <h3 style={{ margin: 0, fontSize: 16, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Improvement Since Day One</h3>
             <button onClick={() => {
+              const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              const rows = athleteData.improvements;
+              const w = 700, rowH = 64, padTop = 150, padBot = 56, barMax = 300, barX = w - 40 - barMax;
+              const h = padTop + rows.length * rowH + padBot;
+              const maxPct = Math.max(1, ...rows.map(r => r.pct));
               const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-              const w = 600, rowH = 52, padTop = 80, padBot = 40;
-              const h = padTop + athleteData.prs.length * rowH + padBot;
               svg.setAttribute('width', w); svg.setAttribute('height', h); svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-              let svgContent = `<rect width="${w}" height="${h}" fill="#0a1628" rx="16"/>`;
-              svgContent += `<text x="30" y="36" fill="#00d4ff" font-family="Arial Black,sans-serif" font-size="22" font-weight="900">WILMINGTON STRENGTH</text>`;
-              svgContent += `<text x="30" y="60" fill="#888" font-family="Arial,sans-serif" font-size="14">${athleteData.athlete.first_name} ${athleteData.athlete.last_name} — Progress Report</text>`;
-              athleteData.prs.forEach((pr, i) => {
+              let c = `<rect width="${w}" height="${h}" fill="#0a1628" rx="20"/>`;
+              c += `<rect x="6" y="6" width="${w - 12}" height="${h - 12}" fill="none" stroke="rgba(0,212,255,0.18)" stroke-width="2" rx="16"/>`;
+              c += `<text x="40" y="52" fill="#00d4ff" font-family="Arial Black,sans-serif" font-size="30" font-weight="900">WILMINGTON STRENGTH</text>`;
+              c += `<text x="40" y="86" fill="#fff" font-family="Arial Black,sans-serif" font-size="34" font-weight="900">${esc(athleteData.athlete.first_name + ' ' + athleteData.athlete.last_name)}</text>`;
+              c += `<text x="40" y="118" fill="#8a96a3" font-family="Arial,sans-serif" font-size="18">Progress since day one${athleteData.prCount > 0 ? ` · ${athleteData.prCount} PR${athleteData.prCount !== 1 ? 's' : ''} this quarter` : ''}</text>`;
+              rows.forEach((pr, i) => {
                 const y = padTop + i * rowH;
-                svgContent += `<rect x="20" y="${y}" width="${w-40}" height="${rowH-8}" fill="rgba(0,255,136,0.08)" rx="8"/>`;
-                svgContent += `<text x="34" y="${y+22}" fill="#00ff88" font-family="Arial,sans-serif" font-size="14" font-weight="700">${pr.testName}</text>`;
-                svgContent += `<text x="34" y="${y+40}" fill="#888" font-family="Arial,sans-serif" font-size="12">${formatOldVal(pr)}  →  ${formatVal(pr)}  (${improvementText(pr)})</text>`;
+                const bw = Math.max(6, Math.round((pr.pct / maxPct) * barMax));
+                c += `<text x="40" y="${y + 20}" fill="#e8e8e8" font-family="Arial,sans-serif" font-size="18" font-weight="700">${esc(pr.testName)}</text>`;
+                c += `<text x="40" y="${y + 42}" fill="#8a96a3" font-family="Arial,sans-serif" font-size="15">${esc(formatOldVal(pr))} → ${esc(formatVal(pr))}</text>`;
+                c += `<rect x="${barX}" y="${y + 6}" width="${barMax}" height="26" fill="rgba(255,255,255,0.05)" rx="13"/>`;
+                c += `<rect x="${barX}" y="${y + 6}" width="${bw}" height="26" fill="#00ff88" rx="13"/>`;
+                c += `<text x="${barX + barMax}" y="${y + 25}" fill="#00ff88" font-family="Arial Black,sans-serif" font-size="17" font-weight="900" text-anchor="end">+${pr.pct}%</text>`;
               });
-              svgContent += `<text x="${w/2}" y="${h-14}" fill="#444" font-family="Arial,sans-serif" font-size="10" text-anchor="middle">wilmington-strength-app.netlify.app</text>`;
-              svg.innerHTML = svgContent;
+              c += `<text x="${w / 2}" y="${h - 22}" fill="#5a6a7a" font-family="Arial,sans-serif" font-size="14" text-anchor="middle">wilmingtonstrength.com · what we test &amp; why</text>`;
+              svg.innerHTML = c;
               const svgData = new XMLSerializer().serializeToString(svg);
               const canvas = document.createElement('canvas'); canvas.width = w * 2; canvas.height = h * 2;
               const ctx = canvas.getContext('2d'); ctx.scale(2, 2);
@@ -2458,13 +2464,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Progress Reports</h1>
-          <p style={{ color: '#888' }}>{flaggedAthletes.length} athletes ready for a progress report</p>
-        </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div style={{ fontSize: 13, color: '#666' }}>Min PRs:</div>
-          {[3, 4, 5, 6].map(n => (<button key={n} onClick={() => setMinPRs(n)} style={{ width: 36, height: 36, background: minPRs === n ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: minPRs === n ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: minPRs === n ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 14, fontWeight: minPRs === n ? 700 : 400 }}>{n}+</button>))}
-          <div style={{ fontSize: 13, color: '#666', marginLeft: 12 }}>Days:</div>
-          {[30, 60, 90, 180].map(d => (<button key={d} onClick={() => setDaysBack(d)} style={{ padding: '6px 12px', background: daysBack === d ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: daysBack === d ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: daysBack === d ? '#00d4ff' : '#666', cursor: 'pointer', fontSize: 13, fontWeight: daysBack === d ? 700 : 400 }}>{d}</button>))}
+          <p style={{ color: '#888' }}>{flaggedAthletes.length} athlete{flaggedAthletes.length !== 1 ? 's' : ''} ready — active 3+ months with real improvement</p>
         </div>
       </div>
 
@@ -2508,7 +2508,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
       })()}
 
       {flaggedAthletes.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes with {minPRs}+ PRs in the last {daysBack} days.</p><p style={{ fontSize: 13 }}>Try lowering the minimum PRs or increasing the time range.</p></div>
+        <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes are report-ready yet.</p><p style={{ fontSize: 13 }}>An athlete shows up here once they've been testing for 3+ months and have improved on at least one test.</p></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {flaggedAthletes.map(({ athlete, prs, lastSent }) => {
@@ -2522,7 +2522,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{athlete.first_name} {athlete.last_name}</div>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · PRs: {prs.map(p => p.testName).join(', ')}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{age && `${age} yrs`}{athlete.gender && ` · ${athlete.gender}`} · Improved: {prs.slice(0, 6).map(p => p.testName).join(', ')}{prs.length > 6 ? '…' : ''}</div>
                 </div>
                 {wasSent ? (
                   <div style={{ textAlign: 'right', flexShrink: 0 }}><span style={{ fontSize: 12, color: '#00ff88', fontWeight: 600 }}>Sent {sentDate}</span></div>
