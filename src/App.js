@@ -584,6 +584,9 @@ export default function App() {
   const saveAssessment = async (athleteId, fields) => {
     const payload = {
       athlete_id: athleteId,
+      school: fields.school || '',
+      how_heard: fields.how_heard || '',
+      sports: fields.sports || '',
       goals: fields.goals || '',
       training_history: fields.training_history || '',
       injury_history: fields.injury_history || '',
@@ -611,6 +614,7 @@ export default function App() {
     const { data, error } = await supabase.from('athletes').insert([{ first_name: athlete.firstName, last_name: athlete.lastName, email: athlete.email || '', phone: athlete.phone || '', birthday: athlete.birthday || null, age, gender: athlete.gender, status: 'Active', type: athlete.type || 'athlete' }]).select();
     if (data) { setAthletes([...athletes, data[0]].sort((a, b) => a.first_name.localeCompare(b.first_name))); showNotification(athlete.firstName + ' ' + athlete.lastName + ' added!'); }
     if (error) showNotification('Error adding athlete', 'error');
+    return data ? data[0] : null;
   };
 
   const updateAthlete = async (id, updates) => {
@@ -731,7 +735,7 @@ export default function App() {
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} onSelectAthlete={goToAthlete} />}
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
-        {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} />}
+        {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} addAthlete={addAthlete} logResults={logResults} getTestById={getTestById} showNotification={showNotification} />}
         {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} adultPrograms={adultPrograms} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
@@ -1223,6 +1227,9 @@ function AthletesPage({ athletes, addAthlete, updateAthlete, deleteAthlete, resu
 /* ===================== ASSESSMENT EDITOR (shared) ===================== */
 function AssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
   const existing = getAssessment(athleteId);
+  const [school, setSchool] = useState('');
+  const [howHeard, setHowHeard] = useState('');
+  const [sports, setSports] = useState('');
   const [goals, setGoals] = useState('');
   const [trainingHistory, setTrainingHistory] = useState('');
   const [injuryHistory, setInjuryHistory] = useState('');
@@ -1231,6 +1238,9 @@ function AssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
+    setSchool(existing?.school || '');
+    setHowHeard(existing?.how_heard || '');
+    setSports(existing?.sports || '');
     setGoals(existing?.goals || '');
     setTrainingHistory(existing?.training_history || '');
     setInjuryHistory(existing?.injury_history || '');
@@ -1240,7 +1250,7 @@ function AssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
 
   const handleSave = async () => {
     setSaving(true);
-    await saveAssessment(athleteId, { goals, training_history: trainingHistory, injury_history: injuryHistory, notes });
+    await saveAssessment(athleteId, { school, how_heard: howHeard, sports, goals, training_history: trainingHistory, injury_history: injuryHistory, notes });
     setSaving(false);
     setDirty(false);
   };
@@ -1258,6 +1268,20 @@ function AssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
         {lastUpdated && <span style={{ fontSize: 12, color: '#888' }}>Last updated {lastUpdated}</span>}
       </div>
       <div style={{ display: 'grid', gap: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18 }}>
+          <div>
+            <label style={labelStyle}>School</label>
+            <input value={school} onChange={handleChange(setSchool)} placeholder="What school do they go to?" style={{ ...taStyle, minHeight: 0 }} />
+          </div>
+          <div>
+            <label style={labelStyle}>How They Heard About Us</label>
+            <input value={howHeard} onChange={handleChange(setHowHeard)} placeholder="Referral, Instagram, walk-in, friend..." style={{ ...taStyle, minHeight: 0 }} />
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Sports</label>
+          <input value={sports} onChange={handleChange(setSports)} placeholder="Sports they play (e.g. Baseball, Football)..." style={{ ...taStyle, minHeight: 0 }} />
+        </div>
         <div>
           <label style={labelStyle}>Goals</label>
           <textarea value={goals} onChange={handleChange(setGoals)} placeholder="What does this athlete want to accomplish? Short and long term goals..." style={taStyle} />
@@ -1284,25 +1308,35 @@ function AssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
 }
 
 /* ===================== ASSESSMENTS PAGE (top level) ===================== */
-function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
+function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, logResults, getTestById, showNotification }) {
   const [selected, setSelected] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [creating, setCreating] = useState(false);
 
+  // Only athletes who actually have an assessment on file (at least one filled field).
+  const hasAssessment = (a) => { const s = getAssessment(a.id); return s && [s.school, s.how_heard, s.sports, s.goals, s.training_history, s.injury_history, s.notes].some(v => v && v.trim().length > 0); };
   const filteredAthletes = athletes.filter(a => {
     const nm = !searchTerm || (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase());
     const tm = filterType === 'all' || (a.type || 'athlete') === filterType;
-    return nm && tm;
+    return nm && tm && hasAssessment(a);
   }).sort((x, y) => (x.first_name + x.last_name).localeCompare(y.first_name + y.last_name));
 
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
   const selectedAthlete = selected ? athletes.find(a => a.id === selected) : null;
 
+  if (creating) {
+    return <NewAthleteAssessment addAthlete={addAthlete} saveAssessment={saveAssessment} logResults={logResults} getTestById={getTestById} showNotification={showNotification} onDone={(newId) => { setCreating(false); if (newId) setSelected(newId); }} onCancel={() => setCreating(false)} />;
+  }
+
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Assessments</h1>
-        <p style={{ color: '#888' }}>Goals, training history, injury history, and notes for each athlete.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Assessments</h1>
+          <p style={{ color: '#888' }}>Athletes with an assessment on file. Create a new athlete and log their baseline testing in one go.</p>
+        </div>
+        {!selected && <button onClick={() => setCreating(true)} style={{ padding: '12px 22px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 15, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>+ New Athlete Assessment</button>}
       </div>
       {!selected && (<>
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1312,7 +1346,7 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {filteredAthletes.map(a => {
             const asmt = getAssessment(a.id);
-            const filledFields = asmt ? [asmt.goals, asmt.training_history, asmt.injury_history, asmt.notes].filter(v => v && v.trim().length > 0).length : 0;
+            const filledFields = asmt ? [asmt.school, asmt.how_heard, asmt.sports, asmt.goals, asmt.training_history, asmt.injury_history, asmt.notes].filter(v => v && v.trim().length > 0).length : 0;
             const isAd = a.type === 'adult';
             return (
               <div key={a.id} onClick={() => setSelected(a.id)} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `1px solid ${isAd ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}>
@@ -1322,7 +1356,7 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
                       <h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
                       {isAd && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}
                     </div>
-                    <p style={{ margin: 0, color: '#888', fontSize: 13 }}>{filledFields > 0 ? `${filledFields} of 4 fields filled` : 'No assessment yet'}</p>
+                    <p style={{ margin: 0, color: '#888', fontSize: 13 }}>{filledFields > 0 ? `${filledFields} of 7 fields filled` : 'No assessment yet'}</p>
                   </div>
                   <span style={{ padding: '4px 10px', background: filledFields > 0 ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.06)', color: filledFields > 0 ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{filledFields > 0 ? 'On file' : 'Empty'}</span>
                 </div>
@@ -1330,7 +1364,7 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
             );
           })}
         </div>
-        {filteredAthletes.length === 0 && (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No athletes found.</div>)}
+        {filteredAthletes.length === 0 && (<div style={{ textAlign: 'center', padding: 48, color: '#666' }}>{searchTerm ? 'No athletes with an assessment match that name.' : 'No assessments on file yet. Click “+ New Athlete Assessment” to add one.'}</div>)}
       </>)}
       {selectedAthlete && (
         <div>
@@ -1344,6 +1378,120 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment }) {
           <AssessmentEditor athleteId={selected} getAssessment={getAssessment} saveAssessment={saveAssessment} />
         </div>
       )}
+    </div>
+  );
+}
+
+/* ===================== NEW ATHLETE ASSESSMENT (create athlete + baseline tests) ===================== */
+// The 8 baseline tests captured during a new-athlete assessment. Values are the RAW
+// numbers a coach would type in Test Entry; conversion + PR logic runs through logResults.
+const ASSESSMENT_TESTS = [
+  { id: '5_0_5', label: '5-0-5', hint: 'sec' },
+  { id: '5_10_fly', label: '5-10 Fly', hint: 'sec' },
+  { id: 'vertical_jump', label: 'Vertical Jump', hint: 'inches' },
+  { id: 'static_jump', label: 'Static Jump', hint: 'inches' },
+  { id: 'rsi', label: 'RSI', hint: 'ratio' },
+  { id: 'sl_rsi_l', label: 'SL RSI Left', hint: 'ratio' },
+  { id: 'sl_rsi_r', label: 'SL RSI Right', hint: 'ratio' },
+];
+function NewAthleteAssessment({ addAthlete, saveAssessment, logResults, getTestById, showNotification, onDone, onCancel }) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [gender, setGender] = useState('');
+  const [school, setSchool] = useState('');
+  const [howHeard, setHowHeard] = useState('');
+  const [sports, setSports] = useState('');
+  const [goals, setGoals] = useState('');
+  const [trainingHistory, setTrainingHistory] = useState('');
+  const [injuryHistory, setInjuryHistory] = useState('');
+  const [notes, setNotes] = useState('');
+  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [testVals, setTestVals] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const setTest = (id, v) => setTestVals(prev => ({ ...prev, [id]: v }));
+
+  const iStyle = { padding: '11px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box', fontFamily: "'Archivo', sans-serif" };
+  const taStyle = { ...iStyle, minHeight: 80, lineHeight: 1.5, resize: 'vertical' };
+  const labelStyle = { display: 'block', marginBottom: 8, fontSize: 12, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600 };
+  const cardStyle = { background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,255,255,0.1)', marginBottom: 20 };
+
+  const handleSubmit = async () => {
+    if (!firstName.trim() || !lastName.trim()) { showNotification('First and last name are required', 'error'); return; }
+    setSaving(true);
+    const newAthlete = await addAthlete({ firstName: firstName.trim(), lastName: lastName.trim(), birthday: birthday || null, gender, type: 'athlete' });
+    if (!newAthlete) { setSaving(false); showNotification('Could not create athlete', 'error'); return; }
+    await saveAssessment(newAthlete.id, { school, how_heard: howHeard, sports, goals, training_history: trainingHistory, injury_history: injuryHistory, notes });
+    // Build baseline test results from whatever numbers were entered.
+    const toLog = [];
+    ASSESSMENT_TESTS.forEach(({ id }) => {
+      const val = testVals[id];
+      if (val === '' || val === undefined || val === null || isNaN(parseFloat(val))) return;
+      const td = getTestById(id);
+      if (!td) return;
+      const raw = parseFloat(val);
+      const cv = td.convert_formula ? applyConversion(td, raw) : raw;
+      toLog.push({ athleteId: newAthlete.id, testId: id, testDate, rawValue: raw, convertedValue: cv, unit: td.unit });
+    });
+    if (toLog.length > 0) await logResults(toLog);
+    setSaving(false);
+    showNotification(`${firstName.trim()} ${lastName.trim()} created${toLog.length ? ` with ${toLog.length} baseline test${toLog.length !== 1 ? 's' : ''}` : ''}!`);
+    onDone(newAthlete.id);
+  };
+
+  return (
+    <div>
+      <button onClick={onCancel} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 20 }}>New Athlete Assessment</h1>
+
+      <div style={cardStyle}>
+        <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Athlete</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+          <div><label style={labelStyle}>First Name *</label><input value={firstName} onChange={(e) => setFirstName(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Last Name *</label><input value={lastName} onChange={(e) => setLastName(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Date of Birth</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Gender</label>
+            <div style={{ display: 'flex', gap: 8 }}>{['M', 'F'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={cardStyle}>
+        <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Questionnaire</h3>
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            <div><label style={labelStyle}>School</label><input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="What school do they go to?" style={iStyle} /></div>
+            <div><label style={labelStyle}>How They Heard About Us</label><input value={howHeard} onChange={(e) => setHowHeard(e.target.value)} placeholder="Referral, Instagram, walk-in, friend..." style={iStyle} /></div>
+          </div>
+          <div><label style={labelStyle}>Sports</label><input value={sports} onChange={(e) => setSports(e.target.value)} placeholder="Sports they play (e.g. Baseball, Football)..." style={iStyle} /></div>
+          <div><label style={labelStyle}>Goals</label><textarea value={goals} onChange={(e) => setGoals(e.target.value)} placeholder="Short and long term goals..." style={taStyle} /></div>
+          <div><label style={labelStyle}>Training History</label><textarea value={trainingHistory} onChange={(e) => setTrainingHistory(e.target.value)} placeholder="Previous training, years lifting, programs followed..." style={taStyle} /></div>
+          <div><label style={labelStyle}>Injury History</label><textarea value={injuryHistory} onChange={(e) => setInjuryHistory(e.target.value)} placeholder="Past injuries, surgeries, current restrictions..." style={taStyle} /></div>
+          <div><label style={labelStyle}>Notes</label><textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything else worth remembering..." style={taStyle} /></div>
+        </div>
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 14, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2 }}>Baseline Testing</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 12, color: '#888' }}>Test date</span><input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} style={{ ...iStyle, width: 'auto', padding: '8px 12px', fontSize: 13 }} /></div>
+        </div>
+        <p style={{ margin: '0 0 16px', color: '#888', fontSize: 13 }}>Enter whatever you have — blanks are skipped. Each number logs as a test result (and a PR, since it's their first).</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+          {ASSESSMENT_TESTS.map(({ id, label, hint }) => (
+            <div key={id}>
+              <label style={{ ...labelStyle, textTransform: 'none', letterSpacing: 0, color: '#ccc', fontSize: 13 }}>{label} <span style={{ color: '#666', fontWeight: 400 }}>({hint})</span></label>
+              <input type="number" inputMode="decimal" value={testVals[id] || ''} onChange={(e) => setTest(id, e.target.value)} placeholder="—" style={iStyle} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={handleSubmit} disabled={saving} style={{ padding: '14px 36px', background: saving ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: saving ? '#aaa' : '#0a1628', fontSize: 16, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>{saving ? 'Saving...' : 'Create Athlete & Save Assessment'}</button>
+        <button onClick={onCancel} disabled={saving} style={{ padding: '14px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#aaa', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+      </div>
     </div>
   );
 }
@@ -1644,8 +1792,26 @@ const eurBand = (eur) => {
   if (eur < 1.12) return { label: 'Good', color: '#00ff88' };
   return { label: 'Excellent', color: '#00ffa8' };
 };
+
+// Change-of-Direction Deficit = 5-0-5 time ÷ 5-10 Fly time. Divides the turn
+// drill by the athlete's own linear speed so a fast kid doesn't post a great
+// 5-0-5 just for being fast — it isolates how well they actually turn. WS uses
+// a 5-10 Fly split (not a 10y/10m sprint), so this ratio and its bands are
+// specific to our testing and scored against OUR population. Lower = keeps more
+// speed through the 180. Bands from WS youth quartiles (p25≈1.52, med≈1.57, p75≈1.62).
+const codBand = (r) => {
+  if (r == null) return { label: '—', color: '#666' };
+  if (r < 1.52) return { label: 'Excellent', color: '#00ffa8' };
+  if (r < 1.57) return { label: 'Good', color: '#00ff88' };
+  if (r < 1.62) return { label: 'Average', color: '#FFA500' };
+  return { label: 'Below Average', color: '#ff6666' };
+};
 const PCTL_COD_TESTS = [
   { id: '5_0_5', name: '5-0-5 Agility', dir: 'lower' },
+  // Derived metric (5-0-5 ÷ 5-10 Fly). Not a real test in the DB — computed
+  // per-athlete after PRs are loaded, then flows through the same percentile
+  // machinery so it ranks, columns, and filters like any other test. Lower = better.
+  { id: 'cod_deficit', name: 'CoD Deficit', dir: 'lower', derived: true },
 ];
 const PCTL_GROUPS = [
   { id: 'speed', label: 'Speed Map',           tests: PCTL_SPEED_TESTS, accent: '#00d4ff' },
@@ -1708,10 +1874,17 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
     prByAthlete[a.id] = {};
     const g = genderOf(a);
     for (const t of allTests) {
+      if (t.derived) continue; // computed below from other PRs
       const pr = bestForTest(a.id, t.id, results, t.dir);
       prByAthlete[a.id][t.id] = pr;
       if (pr != null) pools[t.id][g].push(pr);
     }
+    // Change-of-Direction Deficit = 5-0-5 ÷ 5-10 Fly (both now loaded above).
+    const t505ForCod = prByAthlete[a.id]['5_0_5'];
+    const flyForCod = prByAthlete[a.id]['5_10_fly'];
+    const codVal = (t505ForCod != null && flyForCod != null && flyForCod > 0) ? t505ForCod / flyForCod : null;
+    prByAthlete[a.id]['cod_deficit'] = codVal;
+    if (codVal != null) pools['cod_deficit'][g].push(codVal);
   }
 
   // Build a comparison pool for a test: same gender, optionally limited to
@@ -1733,6 +1906,7 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
 
   const formatPRValue = (testId, val) => {
     if (val == null) return '—';
+    if (testId === 'cod_deficit') return val.toFixed(2);
     const td = getTestById ? getTestById(testId) : null;
     if (td) return formatResultWithUnit(td, val);
     return String(val);
@@ -1789,6 +1963,20 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
           if (pv != null && ps != null && ps > 0) eurPool.push(pv / ps);
         }
         const eurPct = eur != null ? pctlRank(eur, eurPool, 'higher') : null;
+        // Change-of-Direction Deficit = 5-0-5 ÷ 5-10 Fly (speed-adjusted agility).
+        const t505 = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id]['5_0_5'] : null;
+        const fly  = prByAthlete[selectedAthlete.id] ? prByAthlete[selectedAthlete.id]['5_10_fly'] : null;
+        const codDef = (t505 != null && fly != null && fly > 0) ? t505 / fly : null;
+        const codBnd = codBand(codDef);
+        const codPool = [];
+        for (const a of youthAthletes) {
+          if (genderOf(a) !== g) continue;
+          if (windowN != null) { const aa = calculateAge(a.birthday); if (aa == null || age == null || Math.abs(aa - age) > windowN) continue; }
+          const p5 = prByAthlete[a.id] ? prByAthlete[a.id]['5_0_5'] : null;
+          const pf = prByAthlete[a.id] ? prByAthlete[a.id]['5_10_fly'] : null;
+          if (p5 != null && pf != null && pf > 0) codPool.push(p5 / pf);
+        }
+        const codPct = codDef != null ? pctlRank(codDef, codPool, 'lower') : null;
         return (
           <div>
             <div style={{ marginBottom: 20, padding: 20, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -1828,6 +2016,30 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
                   Log both a <strong>Vertical Jump</strong> and a <strong>Static Jump</strong> for this athlete to unlock their eccentric score.
                   {vj != null && sj == null && ' (Static Jump missing.)'}
                   {vj == null && sj != null && ' (Vertical Jump missing.)'}
+                </div>
+              )}
+            </div>
+
+            {/* Change-of-Direction Deficit (5-0-5 ÷ 5-10 Fly) */}
+            <div style={{ background: 'rgba(255,165,0,0.05)', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid rgba(255,165,0,0.25)' }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: 13, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2, fontWeight: 700 }}>Change-of-Direction Deficit</h3>
+              {codDef != null ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 44, fontWeight: 900, fontFamily: "'Archivo Black', sans-serif", color: codBnd.color, lineHeight: 1 }}>{codDef.toFixed(2)}</div>
+                    <div style={{ fontSize: 12, color: codBnd.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginTop: 4 }}>{codBnd.label}</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.6 }}>
+                    5-0-5 {formatPRValue('5_0_5', t505)} ÷ 5-10 Fly {formatPRValue('5_10_fly', fly)}<br />
+                    {codPct != null && codPool.length >= 3 ? <span style={{ color: pctlColor(codPct) }}>{codPct}th percentile</span> : <span style={{ color: '#666' }}>not enough peers to rank</span>}
+                    <span style={{ color: '#666' }}> · how little speed is lost in the 180° turn — lower is better, scored on our 5-10 Fly (not a 10y sprint)</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: '#888' }}>
+                  Log both a <strong>5-0-5</strong> and a <strong>5-10 Fly</strong> for this athlete to unlock their change-of-direction deficit.
+                  {t505 != null && fly == null && ' (5-10 Fly missing.)'}
+                  {t505 == null && fly != null && ' (5-0-5 missing.)'}
                 </div>
               )}
             </div>
@@ -2258,6 +2470,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
   const [selectedAthlete, setSelectedAthlete] = useState(null);
   const [sentReports, setSentReports] = useState([]);
   const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     const loadSent = async () => {
@@ -2478,6 +2691,8 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
     );
   }
 
+  const shownFlagged = flaggedAthletes.filter(f => !search.trim() || (f.athlete.first_name + ' ' + f.athlete.last_name).toLowerCase().includes(search.trim().toLowerCase()));
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
@@ -2485,6 +2700,7 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Progress Reports</h1>
           <p style={{ color: '#888' }}>{flaggedAthletes.length} athlete{flaggedAthletes.length !== 1 ? 's' : ''} ready — active 3+ months with real improvement</p>
         </div>
+        <input type="text" placeholder="Search a kid's name..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 15, width: 260 }} />
       </div>
 
       {/* Quarterly Tracker */}
@@ -2530,7 +2746,10 @@ function ProgressReportsPage({ athletes, results, testDefs, getTestById, showNot
         <div style={{ textAlign: 'center', padding: 48, color: '#666' }}><p style={{ fontSize: 18 }}>No athletes are report-ready yet.</p><p style={{ fontSize: 13 }}>An athlete shows up here once they've been testing for 3+ months and have improved on at least one test.</p></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {flaggedAthletes.map(({ athlete, prs, prCount, lastSent }) => {
+          {search.trim() && shownFlagged.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>No report-ready athlete matches “{search.trim()}”. If they're not listed here, there's no progress report available for them yet.</div>
+          )}
+          {shownFlagged.map(({ athlete, prs, prCount, lastSent }) => {
             const age = calculateAge(athlete.birthday);
             const wasSent = !!lastSent;
             const sentDate = lastSent ? new Date(lastSent.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
