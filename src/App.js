@@ -534,7 +534,12 @@ function SimpleChart({ data, direction, testDef, onPointClick }) {
 
 /* ===================== MAIN APP ===================== */
 export default function App() {
-  const [page, setPage] = useState('entry');
+  // Wall-display deep link. Launching the app at ?tv=records (or ?tv=board) boots
+  // straight into the Record Board TV mode; ?tv=adult boots the Adult Program TV
+  // mode. Lets the gym's Fire Stick recover in one step after any reload/restart.
+  const initialTv = (() => { try { return new URLSearchParams(window.location.search).get('tv'); } catch { return null; } })();
+  const kiosk = initialTv === 'records' || initialTv === 'board' || initialTv === 'adult';
+  const [page, setPage] = useState(initialTv === 'adult' ? 'adultprogram' : (kiosk ? 'recordboard' : 'entry'));
   // Nav starts expanded on wide screens, collapsed on phones (saves half the screen).
   const [navOpen, setNavOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth > 900);
   const [focusAthlete, setFocusAthlete] = useState(null);
@@ -605,7 +610,27 @@ export default function App() {
   };
 
   const getAssessment = (athleteId) => assessments.find(a => a.athlete_id === athleteId) || null;
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData().catch(() => { if (kiosk) setTimeout(() => { try { window.location.reload(); } catch {} }, 30000); }); }, []);
+
+  // Wall-display self-heal (kiosk mode only, launched via ?tv=...). Reload every few
+  // hours to clear browser memory (Silk leaks over an all-day run) and pull fresh
+  // data, and reload the moment connectivity returns after a drop. The ?tv= param
+  // means every reload boots straight back into whatever TV view is active.
+  useEffect(() => {
+    if (!kiosk) return;
+    const reload = () => { try { window.location.reload(); } catch {} };
+    const t = setInterval(reload, 3 * 60 * 60 * 1000); // every 3 hours
+    window.addEventListener('online', reload);
+    return () => { clearInterval(t); window.removeEventListener('online', reload); };
+  }, [kiosk]);
+
+  // If a load finishes empty on the wall display (fetch failed / network blip), it
+  // sits on a blank board until someone notices. Give it 60s, then self-heal.
+  useEffect(() => {
+    if (!kiosk || loading || results.length > 0) return;
+    const t = setTimeout(() => { try { window.location.reload(); } catch {} }, 60000);
+    return () => clearTimeout(t);
+  }, [kiosk, loading, results.length]);
 
   const showNotification = (message, type = 'success') => { setNotification({ message, type }); setTimeout(() => setNotification(null), 4000); };
 
@@ -731,12 +756,12 @@ export default function App() {
         {page === 'recentprs' && <RecentPRsPage athletes={athletes} results={results} getTestById={getTestById} testDefs={testDefs} onSelectAthlete={goToAthlete} onSelectResult={goToAthleteChart} />}
         {page === 'jumpcalc' && <JumpCalcPage athletes={athletes} setAthletes={setAthletes} results={results} logResults={logResults} getPR={getPR} showNotification={showNotification} />}
         {page === 'profiles' && <AthleteProfilePage athletes={athletes} results={results} getTestById={getTestById} />}
-        {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} />}
+        {page === 'recordboard' && <RecordBoardPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} autoTvMode={kiosk && initialTv !== 'adult'} kiosk={kiosk} />}
         {page === 'testsettings' && <TestSettingsPage testDefs={testDefs} setTestDefs={setTestDefs} showNotification={showNotification} />}
         {page === 'progressreports' && <ProgressReportsPage athletes={athletes} results={results} testDefs={testDefs} getTestById={getTestById} showNotification={showNotification} onSelectAthlete={goToAthlete} />}
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
         {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} addAthlete={addAthlete} logResults={logResults} getTestById={getTestById} showNotification={showNotification} />}
-        {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} adultPrograms={adultPrograms} />}
+        {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} adultPrograms={adultPrograms} autoTvMode={kiosk && initialTv === 'adult'} kiosk={kiosk} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -2225,10 +2250,14 @@ function AthleteProfilePage({ athletes, results, getTestById }) {
 }
 
 /* ===================== RECORD BOARD ===================== */
-function RecordBoardPage({ athletes, results, testDefs, getTestById }) {
+function RecordBoardPage({ athletes, results, testDefs, getTestById, autoTvMode, kiosk }) {
   const [section, setSection] = useState('boys');
   const [autoSwitch, setAutoSwitch] = useState(false);
   const [tvMode, setTvMode] = useState(false);
+  // Wall-display deep link: auto-enter TV mode on load, and keep the URL pointed at
+  // this view so a reload/power-cycle returns straight to the record board.
+  useEffect(() => { if (autoTvMode) { setAutoSwitch(true); setTvMode(true); } }, [autoTvMode]);
+  useEffect(() => { if (kiosk && tvMode) { try { window.history.replaceState(null, '', '?tv=records'); } catch {} } }, [kiosk, tvMode]);
 
   const boardSpeed = testDefs.filter(t => t.show_on_record_board && t.record_board_section === 'speed' && t.active);
   const boardStrength = testDefs.filter(t => t.show_on_record_board && t.record_board_section === 'strength' && t.active);
@@ -2889,7 +2918,7 @@ function MphClubPage({ athletes, results }) {
    leaderboard (top male + top female for the challenge test, filtered to
    results recorded THIS month, adult category only). Auto-swaps to the next
    month's routine on the 1st via ADULT_PROGRAM_MONTHS lookup. */
-function AdultProgramPage({ athletes, results, getTestById, adultPrograms }) {
+function AdultProgramPage({ athletes, results, getTestById, adultPrograms, autoTvMode, kiosk }) {
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -2951,6 +2980,10 @@ function AdultProgramPage({ athletes, results, getTestById, adultPrograms }) {
 
   // ---- TV MODE (same pattern as the Record Board) ----
   const [tvMode, setTvMode] = useState(false);
+  // Wall-display deep link: auto-enter TV mode on load, and keep the URL pointed at
+  // this view so a reload/power-cycle returns straight to the adult warm-ups.
+  useEffect(() => { if (autoTvMode) setTvMode(true); }, [autoTvMode]);
+  useEffect(() => { if (kiosk && tvMode) { try { window.history.replaceState(null, '', '?tv=adult'); } catch {} } }, [kiosk, tvMode]);
   const wakeLockRef = useRef(null);
   useEffect(() => { if (!tvMode) { if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } return; } const req = async () => { try { if ('wakeLock' in navigator) { wakeLockRef.current = await navigator.wakeLock.request('screen'); } } catch {} }; req(); const h = () => { if (document.visibilityState === 'visible') req(); }; document.addEventListener('visibilitychange', h); return () => { document.removeEventListener('visibilitychange', h); if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); } }; }, [tvMode]);
   const tvContentRef = useRef(null); const tvContainerRef = useRef(null); const [tvScale, setTvScale] = useState(1);
