@@ -596,6 +596,8 @@ export default function App() {
       training_history: fields.training_history || '',
       injury_history: fields.injury_history || '',
       notes: fields.notes || '',
+      assessment_type: fields.assessment_type || 'athlete',
+      adult_data: fields.adult_data || null,
       updated_at: new Date().toISOString(),
     };
     const { data, error } = await supabase.from('athlete_assessments').upsert(payload, { onConflict: 'athlete_id' }).select();
@@ -1340,7 +1342,12 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
   const [creating, setCreating] = useState(false);
 
   // Only athletes who actually have an assessment on file (at least one filled field).
-  const hasAssessment = (a) => { const s = getAssessment(a.id); return s && [s.school, s.how_heard, s.sports, s.goals, s.training_history, s.injury_history, s.notes].some(v => v && v.trim().length > 0); };
+  const hasAssessment = (a) => {
+    const s = getAssessment(a.id);
+    if (!s) return false;
+    if (s.assessment_type === 'adult') return adultHasContent(s.adult_data);
+    return [s.school, s.how_heard, s.sports, s.goals, s.training_history, s.injury_history, s.notes].some(v => v && v.trim().length > 0);
+  };
   const filteredAthletes = athletes.filter(a => {
     const nm = !searchTerm || (a.first_name + ' ' + a.last_name).toLowerCase().includes(searchTerm.toLowerCase());
     const tm = filterType === 'all' || (a.type || 'athlete') === filterType;
@@ -1350,6 +1357,9 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
   const iStyle = { padding: '12px 16px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 16 };
   const selectedAthlete = selected ? athletes.find(a => a.id === selected) : null;
 
+  if (creating === 'adult') {
+    return <NewAdultAssessment addAthlete={addAthlete} saveAssessment={saveAssessment} logResults={logResults} getTestById={getTestById} showNotification={showNotification} onDone={(newId) => { setCreating(false); if (newId) setSelected(newId); }} onCancel={() => setCreating(false)} />;
+  }
   if (creating) {
     return <NewAthleteAssessment addAthlete={addAthlete} saveAssessment={saveAssessment} logResults={logResults} getTestById={getTestById} showNotification={showNotification} onDone={(newId) => { setCreating(false); if (newId) setSelected(newId); }} onCancel={() => setCreating(false)} />;
   }
@@ -1361,7 +1371,12 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
           <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 32, marginBottom: 8 }}>Assessments</h1>
           <p style={{ color: '#888' }}>Athletes with an assessment on file. Create a new athlete and log their baseline testing in one go.</p>
         </div>
-        {!selected && <button onClick={() => setCreating(true)} style={{ padding: '12px 22px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 15, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>+ New Athlete Assessment</button>}
+        {!selected && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => setCreating('athlete')} style={{ padding: '12px 22px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 15, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>+ New Athlete Assessment</button>
+            <button onClick={() => setCreating('adult')} style={{ padding: '12px 22px', background: 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 15, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>+ New Adult Assessment</button>
+          </div>
+        )}
       </div>
       {!selected && (<>
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1371,8 +1386,10 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
           {filteredAthletes.map(a => {
             const asmt = getAssessment(a.id);
-            const filledFields = asmt ? [asmt.school, asmt.how_heard, asmt.sports, asmt.goals, asmt.training_history, asmt.injury_history, asmt.notes].filter(v => v && v.trim().length > 0).length : 0;
             const isAd = a.type === 'adult';
+            const isAdultAsmt = asmt && asmt.assessment_type === 'adult';
+            const filledFields = (asmt && !isAdultAsmt) ? [asmt.school, asmt.how_heard, asmt.sports, asmt.goals, asmt.training_history, asmt.injury_history, asmt.notes].filter(v => v && v.trim().length > 0).length : 0;
+            const adultSubtitle = isAdultAsmt ? (() => { const st = asmt.adult_data && asmt.adult_data.outcome && asmt.adult_data.outcome.status; return st === 'signed_up' ? 'Signed up' : st === 'follow_up' ? 'Follow-up scheduled' : 'Adult intake on file'; })() : null;
             return (
               <div key={a.id} onClick={() => setSelected(a.id)} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 20, border: `1px solid ${isAd ? 'rgba(255,165,0,0.15)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
@@ -1381,9 +1398,9 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
                       <h3 style={{ margin: 0, fontSize: 18 }}>{a.first_name} {a.last_name}</h3>
                       {isAd && <span style={{ fontSize: 11, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}
                     </div>
-                    <p style={{ margin: 0, color: '#888', fontSize: 13 }}>{filledFields > 0 ? `${filledFields} of 7 fields filled` : 'No assessment yet'}</p>
+                    <p style={{ margin: 0, color: '#888', fontSize: 13 }}>{isAdultAsmt ? adultSubtitle : (filledFields > 0 ? `${filledFields} of 7 fields filled` : 'No assessment yet')}</p>
                   </div>
-                  <span style={{ padding: '4px 10px', background: filledFields > 0 ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.06)', color: filledFields > 0 ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{filledFields > 0 ? 'On file' : 'Empty'}</span>
+                  <span style={{ padding: '4px 10px', background: (isAdultAsmt || filledFields > 0) ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.06)', color: (isAdultAsmt || filledFields > 0) ? '#00ff88' : '#888', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>{(isAdultAsmt || filledFields > 0) ? 'On file' : 'Empty'}</span>
                 </div>
               </div>
             );
@@ -1400,7 +1417,9 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
               {selectedAthlete.type === 'adult' && <span style={{ fontSize: 12, background: 'rgba(255,165,0,0.2)', color: '#FFA500', padding: '3px 10px', borderRadius: 10, fontWeight: 600 }}>ADULT</span>}
             </div>
           </div>
-          <AssessmentEditor athleteId={selected} getAssessment={getAssessment} saveAssessment={saveAssessment} />
+          {(() => { const a = getAssessment(selected); return a && a.assessment_type === 'adult'
+            ? <AdultAssessmentEditor athleteId={selected} getAssessment={getAssessment} saveAssessment={saveAssessment} />
+            : <AssessmentEditor athleteId={selected} getAssessment={getAssessment} saveAssessment={saveAssessment} />; })()}
         </div>
       )}
     </div>
@@ -1516,6 +1535,209 @@ function NewAthleteAssessment({ addAthlete, saveAssessment, logResults, getTestB
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <button onClick={handleSubmit} disabled={saving} style={{ padding: '14px 36px', background: saving ? '#555' : 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: saving ? '#aaa' : '#0a1628', fontSize: 16, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>{saving ? 'Saving...' : 'Create Athlete & Save Assessment'}</button>
         <button onClick={onCancel} disabled={saving} style={{ padding: '14px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#aaa', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== ADULT ASSESSMENT ===================== */
+// Adult intake is stored in the assessment row's `adult_data` jsonb blob. The
+// baseline tests below log to the results table (same as the athlete flow).
+const ADULT_BASELINE = [
+  { title: 'Vertical Jump', why: "This measures relative power, the fitness quality most strongly tied to living long. Research shows power predicts survival better than strength, and it declines earliest with age. If we're raising your watts per kilo, we're training the thing the mortality data points at.", tests: [{ id: 'vertical_jump', label: 'Vertical Jump', hint: 'inches' }] },
+  { title: 'RSI', why: "This measures your spring: how well your tendons and reflexes absorb and return force. That system fades with age separately from strength, and it's what catches you when you trip. We test it so we can train it back.", tests: [{ id: 'rsi', label: 'RSI', hint: 'ratio' }] },
+  { title: 'Body Comp', why: "Muscle is your retirement account and this is the statement. We track muscle mass, body fat, and waist to height because muscle is the organ of longevity and waist to height is the fastest read on metabolic health.", tests: [{ id: 'body_weight', label: 'Weight', hint: 'lb' }, { id: 'body_fat_pct', label: 'Body Fat', hint: '%' }, { id: 'lean_muscle_mass', label: 'Muscle Mass', hint: 'lb' }] },
+];
+const adultHasContent = (d) => {
+  if (!d) return false;
+  if ([d.how_heard, d.why_now, d.training_history, d.injury_history, d.injury_impact, d.prescription].some(v => v && String(v).trim())) return true;
+  if (d.movement && Object.values(d.movement).some(v => v && String(v).trim())) return true;
+  if (d.outcome && d.outcome.status) return true;
+  return false;
+};
+const assembleAdultData = (data) => ({
+  how_heard: data.how_heard || '', why_now: data.why_now || '', training_history: data.training_history || '',
+  injury_history: data.injury_history || '', injury_impact: data.injury_impact || '',
+  movement: { squat: data.squat || '', kb_deadlift: data.kb_deadlift || '', aslr: data.aslr || '', ankle_kw_left: data.ankle_kw_left || '', ankle_kw_right: data.ankle_kw_right || '' },
+  prescription: data.prescription || '', outcome: { status: data.outcome_status || '', followup_date: data.followup_date || '' },
+});
+const flattenAdultData = (ad) => ({
+  how_heard: (ad && ad.how_heard) || '', why_now: (ad && ad.why_now) || '', training_history: (ad && ad.training_history) || '',
+  injury_history: (ad && ad.injury_history) || '', injury_impact: (ad && ad.injury_impact) || '',
+  squat: (ad && ad.movement && ad.movement.squat) || '', kb_deadlift: (ad && ad.movement && ad.movement.kb_deadlift) || '', aslr: (ad && ad.movement && ad.movement.aslr) || '',
+  ankle_kw_left: (ad && ad.movement && ad.movement.ankle_kw_left) || '', ankle_kw_right: (ad && ad.movement && ad.movement.ankle_kw_right) || '',
+  prescription: (ad && ad.prescription) || '', outcome_status: (ad && ad.outcome && ad.outcome.status) || '', followup_date: (ad && ad.outcome && ad.outcome.followup_date) || '',
+});
+
+// Sections 1–5 (how heard, why now, training, injury + impact, movement screen).
+function AdultFieldsTop({ data, setField, iStyle, taStyle, labelStyle, cardStyle }) {
+  return (<>
+    <div style={cardStyle}>
+      <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Intake</h3>
+      <div style={{ display: 'grid', gap: 16 }}>
+        <div><label style={labelStyle}>How Did You Hear About Us</label><input value={data.how_heard} onChange={(e) => setField('how_heard', e.target.value)} placeholder="Referral, Instagram, walk-in, friend..." style={iStyle} /></div>
+        <div><label style={labelStyle}>Why Now</label><textarea value={data.why_now} onChange={(e) => setField('why_now', e.target.value)} placeholder="Why they reached out and what their goals are..." style={taStyle} /></div>
+        <div><label style={labelStyle}>Training History</label><textarea value={data.training_history} onChange={(e) => setField('training_history', e.target.value)} placeholder="Past training, sports, lifting experience..." style={taStyle} /></div>
+        <div><label style={labelStyle}>Injury History</label><textarea value={data.injury_history} onChange={(e) => setField('injury_history', e.target.value)} placeholder="Past injuries, surgeries, current pain or restrictions..." style={taStyle} /></div>
+        <div><label style={labelStyle}>How It Shows Up</label><textarea value={data.injury_impact} onChange={(e) => setField('injury_impact', e.target.value)} placeholder="Where it affects their daily life, sleep, work..." style={taStyle} /></div>
+      </div>
+    </div>
+    <div style={cardStyle}>
+      <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Movement Screen</h3>
+      <div style={{ display: 'grid', gap: 16 }}>
+        <div><label style={labelStyle}>Squat</label><textarea value={data.squat} onChange={(e) => setField('squat', e.target.value)} placeholder="Notes..." style={taStyle} /></div>
+        <div><label style={labelStyle}>Kettlebell Deadlift</label><textarea value={data.kb_deadlift} onChange={(e) => setField('kb_deadlift', e.target.value)} placeholder="Notes..." style={taStyle} /></div>
+        <div><label style={labelStyle}>Active Straight Leg Raise</label><textarea value={data.aslr} onChange={(e) => setField('aslr', e.target.value)} placeholder="Notes..." style={taStyle} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+          <div><label style={labelStyle}>Ankle Knee-to-Wall — Left <span style={{ color: '#666', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(in, optional)</span></label><input type="number" inputMode="decimal" value={data.ankle_kw_left} onChange={(e) => setField('ankle_kw_left', e.target.value)} placeholder="—" style={iStyle} /></div>
+          <div><label style={labelStyle}>Ankle Knee-to-Wall — Right <span style={{ color: '#666', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(in, optional)</span></label><input type="number" inputMode="decimal" value={data.ankle_kw_right} onChange={(e) => setField('ankle_kw_right', e.target.value)} placeholder="—" style={iStyle} /></div>
+        </div>
+      </div>
+    </div>
+  </>);
+}
+// Sections 7–8 (prescription, outcome).
+function AdultFieldsBottom({ data, setField, iStyle, taStyle, labelStyle, cardStyle }) {
+  const outBtn = (val, label) => (
+    <button onClick={() => setField('outcome_status', data.outcome_status === val ? '' : val)} style={{ flex: 1, padding: '11px 0', background: data.outcome_status === val ? 'rgba(0,255,136,0.2)' : 'rgba(255,255,255,0.05)', border: data.outcome_status === val ? '1px solid #00ff88' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: data.outcome_status === val ? '#00ff88' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{label}</button>
+  );
+  return (<>
+    <div style={cardStyle}>
+      <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Prescription</h3>
+      <textarea value={data.prescription} onChange={(e) => setField('prescription', e.target.value)} placeholder="Coach's recommendation..." style={{ ...taStyle, minHeight: 120 }} />
+    </div>
+    <div style={cardStyle}>
+      <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Outcome</h3>
+      <div style={{ display: 'flex', gap: 8, maxWidth: 360 }}>{outBtn('signed_up', 'Signed Up')}{outBtn('follow_up', 'Follow-Up')}</div>
+      {data.outcome_status === 'follow_up' && (
+        <div style={{ marginTop: 16, maxWidth: 240 }}><label style={labelStyle}>Follow-Up Date</label><input type="date" value={data.followup_date} onChange={(e) => setField('followup_date', e.target.value)} style={iStyle} /></div>
+      )}
+    </div>
+  </>);
+}
+
+function NewAdultAssessment({ addAthlete, saveAssessment, logResults, getTestById, showNotification, onDone, onCancel }) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [gender, setGender] = useState('');
+  const [data, setData] = useState({});
+  const [testDate, setTestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [testVals, setTestVals] = useState({});
+  const [saving, setSaving] = useState(false);
+  const setField = (k, v) => setData(prev => ({ ...prev, [k]: v }));
+  const setTest = (id, v) => setTestVals(prev => ({ ...prev, [id]: v }));
+
+  const iStyle = { padding: '11px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box', fontFamily: "'Archivo', sans-serif" };
+  const taStyle = { ...iStyle, minHeight: 80, lineHeight: 1.5, resize: 'vertical' };
+  const labelStyle = { display: 'block', marginBottom: 8, fontSize: 12, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600 };
+  const cardStyle = { background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,165,0,0.15)', marginBottom: 20 };
+  const fieldProps = { data, setField, iStyle, taStyle, labelStyle, cardStyle };
+
+  const handleSubmit = async () => {
+    if (!firstName.trim() || !lastName.trim()) { showNotification('First and last name are required', 'error'); return; }
+    setSaving(true);
+    const newAthlete = await addAthlete({ firstName: firstName.trim(), lastName: lastName.trim(), birthday: birthday || null, gender, type: 'adult' });
+    if (!newAthlete) { setSaving(false); showNotification('Could not create adult client', 'error'); return; }
+    await saveAssessment(newAthlete.id, { assessment_type: 'adult', adult_data: assembleAdultData(data) });
+    const toLog = [];
+    ADULT_BASELINE.forEach(g => g.tests.forEach(({ id }) => {
+      const val = testVals[id];
+      if (val === '' || val === undefined || val === null || isNaN(parseFloat(val))) return;
+      const td = getTestById(id);
+      if (!td) return;
+      const raw = parseFloat(val);
+      const cv = td.convert_formula ? applyConversion(td, raw) : raw;
+      toLog.push({ athleteId: newAthlete.id, testId: id, testDate, rawValue: raw, convertedValue: cv, unit: td.unit });
+    }));
+    if (toLog.length > 0) await logResults(toLog);
+    setSaving(false);
+    showNotification(`${firstName.trim()} ${lastName.trim()} created${toLog.length ? ` with ${toLog.length} baseline test${toLog.length !== 1 ? 's' : ''}` : ''}!`);
+    onDone(newAthlete.id);
+  };
+
+  return (
+    <div>
+      <button onClick={onCancel} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#aaa', cursor: 'pointer', fontSize: 13, marginBottom: 20 }}>← Back to list</button>
+      <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 28, marginBottom: 20 }}>New Adult Assessment</h1>
+
+      <div style={cardStyle}>
+        <h3 style={{ margin: '0 0 18px', fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Adult Client</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+          <div><label style={labelStyle}>First Name *</label><input value={firstName} onChange={(e) => setFirstName(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Last Name *</label><input value={lastName} onChange={(e) => setLastName(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Date of Birth</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={iStyle} /></div>
+          <div><label style={labelStyle}>Gender</label>
+            <div style={{ display: 'flex', gap: 8 }}>{['M', 'F'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(255,165,0,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #FFA500' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#FFA500' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}</div>
+          </div>
+        </div>
+      </div>
+
+      <AdultFieldsTop {...fieldProps} />
+
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 14, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 2 }}>Baseline Tests</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 12, color: '#888' }}>Test date</span><input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} style={{ ...iStyle, width: 'auto', padding: '8px 12px', fontSize: 13 }} /></div>
+        </div>
+        <p style={{ margin: '0 0 16px', color: '#888', fontSize: 13 }}>All optional — blanks are skipped.</p>
+        <div style={{ display: 'grid', gap: 18 }}>
+          {ADULT_BASELINE.map(g => (
+            <div key={g.title} style={{ background: 'rgba(0,0,0,0.18)', borderRadius: 10, padding: 16, borderLeft: '3px solid #FFA500' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#eee', marginBottom: 6 }}>{g.title}</div>
+              <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#9fb3c8', lineHeight: 1.55 }}>{g.why}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+                {g.tests.map(({ id, label, hint }) => (
+                  <div key={id}>
+                    <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#ccc' }}>{label} <span style={{ color: '#666' }}>({hint})</span></label>
+                    <input type="number" inputMode="decimal" value={testVals[id] || ''} onChange={(e) => setTest(id, e.target.value)} placeholder="—" style={iStyle} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <AdultFieldsBottom {...fieldProps} />
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={handleSubmit} disabled={saving} style={{ padding: '14px 36px', background: saving ? '#555' : 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 8, color: saving ? '#aaa' : '#0a1628', fontSize: 16, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>{saving ? 'Saving...' : 'Create Adult & Save Assessment'}</button>
+        <button onClick={onCancel} disabled={saving} style={{ padding: '14px 24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: '#aaa', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AdultAssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
+  const existing = getAssessment(athleteId);
+  const [data, setData] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { setData(flattenAdultData(existing && existing.adult_data)); setDirty(false); }, [athleteId, existing && existing.id, existing && existing.updated_at]);
+  const setField = (k, v) => { setData(prev => ({ ...prev, [k]: v })); setDirty(true); };
+
+  const iStyle = { padding: '11px 14px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box', fontFamily: "'Archivo', sans-serif" };
+  const taStyle = { ...iStyle, minHeight: 80, lineHeight: 1.5, resize: 'vertical' };
+  const labelStyle = { display: 'block', marginBottom: 8, fontSize: 12, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600 };
+  const cardStyle = { background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, border: '1px solid rgba(255,165,0,0.15)', marginBottom: 20 };
+  const fieldProps = { data, setField, iStyle, taStyle, labelStyle, cardStyle };
+
+  const handleSave = async () => { setSaving(true); await saveAssessment(athleteId, { assessment_type: 'adult', adult_data: assembleAdultData(data) }); setSaving(false); setDirty(false); };
+  const lastUpdated = existing && existing.updated_at ? new Date(existing.updated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 20 }}>Adult Assessment</h3>
+        {lastUpdated && <span style={{ fontSize: 12, color: '#888' }}>Last updated {lastUpdated}</span>}
+      </div>
+      <AdultFieldsTop {...fieldProps} />
+      <AdultFieldsBottom {...fieldProps} />
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>Baseline tests (vertical, RSI, body comp) are logged to this client's profile and history.</div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={handleSave} disabled={saving || !dirty} style={{ padding: '12px 32px', background: (saving || !dirty) ? '#555' : 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 8, color: (saving || !dirty) ? '#aaa' : '#0a1628', fontSize: 15, fontWeight: 700, cursor: (saving || !dirty) ? 'not-allowed' : 'pointer' }}>{saving ? 'Saving...' : (dirty ? 'Save Assessment' : 'Saved')}</button>
+        {dirty && <span style={{ fontSize: 12, color: '#FFA500' }}>Unsaved changes</span>}
       </div>
     </div>
   );
