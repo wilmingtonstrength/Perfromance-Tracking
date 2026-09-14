@@ -5,6 +5,16 @@ const supabaseUrl = 'https://xxtomnbvinxuvnrrqnqb.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4dG9tbmJ2aW54dXZucnJxbnFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMTk5MTksImV4cCI6MjA4NTc5NTkxOX0.Ty-KRgr9JsYr7ZEZtvm7lB2TxcdWeW1CCsJQdWyFND8';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Last-good snapshot of the whole dataset, kept in the browser so the app can
+// paint instantly from cache while it refreshes in the background. This is what
+// keeps a slow or degraded Supabase backend from looking like a total outage:
+// the record board / wall TV shows the last known data immediately instead of a
+// blank "Loading..." screen for minutes. Wrapped in try/catch because storage
+// can be unavailable or over quota.
+const CACHE_KEY = 'ws_data_cache_v1';
+const readCache = () => { try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch { return null; } };
+const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch {} };
+
 /* ===================== HELPERS ===================== */
 const formatFeetInches = (totalInches) => {
   if (totalInches === null || totalInches === undefined || isNaN(totalInches)) return '-';
@@ -554,6 +564,7 @@ export default function App() {
   const [adultPrograms, setAdultPrograms] = useState([]);
   const [notification, setNotification] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const getTestById = (id) => testDefs.find(t => t.id === id) || null;
   const getYouthTests = () => testDefs.filter(t => t.athlete_type === 'athlete' || t.athlete_type === 'both');
@@ -565,25 +576,69 @@ export default function App() {
     return grouped;
   };
 
-  const loadData = async () => {
-    setLoading(true);
-    const { data: td } = await supabase.from('tests').select('*').eq('active', true).order('sort_order');
-    if (td) setTestDefs(td);
-    const { data: ad } = await supabase.from('athletes').select('*').order('first_name');
-    let allResults = []; let from = 0;
-    while (true) {
-      const { data: batch } = await supabase.from('results').select('*').range(from, from + 499);
-      if (batch && batch.length > 0) allResults = [...allResults, ...batch];
-      if (!batch || batch.length < 500) break;
-      from += 500;
+  // Fetch every result. The table can be several thousand rows, so instead of
+  // walking pages one-at-a-time (which, when the backend is slow, stacks 10+
+  // sequential round-trips into minutes of blank screen), we read the count once
+  // and pull all pages IN PARALLEL. Falls back to sequential paging if the count
+  // query fails.
+  const fetchAllResults = async () => {
+    const PAGE = 1000;
+    const head = await supabase.from('results').select('id', { count: 'exact', head: true });
+    const total = head.count;
+    if (total == null) {
+      let all = [], from = 0;
+      while (true) {
+        const { data: batch } = await supabase.from('results').select('*').range(from, from + PAGE - 1);
+        if (batch && batch.length) all = all.concat(batch);
+        if (!batch || batch.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
     }
-    if (ad) setAthletes(ad);
-    setResults(allResults);
-    const { data: asmts } = await supabase.from('athlete_assessments').select('*');
-    if (asmts) setAssessments(asmts);
-    const { data: aprogs } = await supabase.from('adult_programs').select('*').order('month_key', { ascending: false });
-    if (aprogs) setAdultPrograms(aprogs);
-    setLoading(false);
+    const pages = Math.max(1, Math.ceil(total / PAGE));
+    const reqs = [];
+    for (let p = 0; p < pages; p++) reqs.push(supabase.from('results').select('*').range(p * PAGE, p * PAGE + PAGE - 1));
+    const parts = await Promise.all(reqs);
+    return parts.flatMap(r => r.data || []);
+  };
+
+  const loadData = async () => {
+    // 1) Paint instantly from the last good snapshot if we have one, so a slow
+    //    backend never shows a frozen "Loading..." screen.
+    const cached = readCache();
+    if (cached) {
+      if (cached.testDefs) setTestDefs(cached.testDefs);
+      if (cached.athletes) setAthletes(cached.athletes);
+      if (cached.results) setResults(cached.results);
+      if (cached.assessments) setAssessments(cached.assessments);
+      if (cached.adultPrograms) setAdultPrograms(cached.adultPrograms);
+      setLoading(false);
+    }
+    // 2) Refresh from the network in parallel. Cached screen stays up meanwhile.
+    try {
+      const [tdRes, adRes, allResults, asmtRes, aprogRes] = await Promise.all([
+        supabase.from('tests').select('*').eq('active', true).order('sort_order'),
+        supabase.from('athletes').select('*').order('first_name'),
+        fetchAllResults(),
+        supabase.from('athlete_assessments').select('*'),
+        supabase.from('adult_programs').select('*').order('month_key', { ascending: false }),
+      ]);
+      const td = tdRes.data, ad = adRes.data, asmts = asmtRes.data, aprogs = aprogRes.data;
+      if (td) setTestDefs(td);
+      if (ad) setAthletes(ad);
+      setResults(allResults);
+      if (asmts) setAssessments(asmts);
+      if (aprogs) setAdultPrograms(aprogs);
+      writeCache({ testDefs: td, athletes: ad, results: allResults, assessments: asmts, adultPrograms: aprogs });
+      setLoadError(false);
+    } catch (e) {
+      // Network/API failure. If we already painted from cache, just keep showing
+      // it. If this was a cold first load with no cache, surface a retry instead
+      // of hanging forever on the loading screen.
+      if (!cached) setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveAssessment = async (athleteId, fields) => {
@@ -612,7 +667,7 @@ export default function App() {
   };
 
   const getAssessment = (athleteId) => assessments.find(a => a.athlete_id === athleteId) || null;
-  useEffect(() => { loadData().catch(() => { if (kiosk) setTimeout(() => { try { window.location.reload(); } catch {} }, 30000); }); }, []);
+  useEffect(() => { loadData(); }, []);
 
   // Wall-display self-heal (kiosk mode only, launched via ?tv=...). Reload every few
   // hours to clear browser memory (Silk leaks over an all-day run) and pull fresh
@@ -713,7 +768,14 @@ export default function App() {
     return sorted[0];
   };
 
-  if (loading) return (<div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d4ff', fontSize: 20 }}>Loading...</div>);
+  if (loadError && !loading) return (
+    <div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24, textAlign: 'center', fontFamily: "'Archivo', sans-serif" }}>
+      <div style={{ color: '#FFA500', fontSize: 22, fontWeight: 800 }}>Can't reach the server right now</div>
+      <div style={{ color: '#8ea3bc', fontSize: 15, maxWidth: 420, lineHeight: 1.5 }}>The database is slow or unreachable (this is on Supabase's end, not your data). Give it a few seconds and try again.</div>
+      <button onClick={() => { setLoadError(false); setLoading(true); loadData(); }} style={{ padding: '12px 28px', background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Try again</button>
+    </div>
+  );
+  if (loading) return (<div style={{ minHeight: '100vh', background: '#0a1628', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: '#00d4ff', fontSize: 20, fontFamily: "'Archivo', sans-serif" }}><div>Loading…</div><div style={{ color: '#5c6c82', fontSize: 13 }}>Pulling the latest results</div></div>);
 
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
