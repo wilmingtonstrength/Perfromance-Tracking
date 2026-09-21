@@ -1494,6 +1494,7 @@ function AssessmentsPage({ athletes, getAssessment, saveAssessment, addAthlete, 
 const ASSESSMENT_TESTS = [
   { id: '5_0_5', label: '5-0-5', hint: 'sec' },
   { id: '5_10_fly', label: '5-10 Fly', hint: 'sec' },
+  { id: 'max_velocity', label: 'Max Velocity', hint: '20-10 fly, sec' },
   { id: 'vertical_jump', label: 'Vertical Jump', hint: 'inches' },
   { id: 'static_jump', label: 'Static Jump', hint: 'inches' },
   { id: 'rsi', label: 'RSI', hint: 'ratio' },
