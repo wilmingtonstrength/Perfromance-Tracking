@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // the record board / wall TV shows the last known data immediately instead of a
 // blank "Loading..." screen for minutes. Wrapped in try/catch because storage
 // can be unavailable or over quota.
-const CACHE_KEY = 'ws_data_cache_v1';
+const CACHE_KEY = 'ws_data_cache_v2';
 const readCache = () => { try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch { return null; } };
 const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch {} };
 
@@ -761,20 +761,22 @@ export default function App() {
     if (isNaN(raw)) return null;
     const cv = td && td.convert_formula ? applyConversion(td, raw) : raw;
     const today = new Date().toISOString().split('T')[0];
-    const dupes = results.filter(r => r.athlete_id === athleteId && r.test_id === testId && r.test_date === today);
-    if (dupes.length) await supabase.from('results').delete().in('id', dupes.map(r => r.id));
     const prior = results.filter(r => r.athlete_id === athleteId && r.test_id === testId && r.test_date !== today);
     let isPR = prior.length === 0;
     if (!isPR && td) {
       const best = td.direction === 'higher' ? Math.max(...prior.map(r => parseFloat(r.converted_value))) : Math.min(...prior.map(r => parseFloat(r.converted_value)));
       isPR = td.direction === 'higher' ? cv > best : cv < best;
     }
-    const { data } = await supabase.from('results').insert([{ athlete_id: athleteId, test_id: testId, test_date: today, raw_value: raw, converted_value: cv, unit: td ? td.unit : null, is_pr: isPR }]).select();
-    if (data && data[0]) {
-      setResults(prev => [...prev.filter(r => !(r.athlete_id === athleteId && r.test_id === testId && r.test_date === today)), data[0]]);
-      return { row: data[0], isPR };
-    }
-    return null;
+    // Insert FIRST and CHECK the result. A silent failure here was how combine
+    // times got lost — now the caller is told so the coach can retry. We only
+    // delete an earlier same-day duplicate AFTER a confirmed insert, so a slow or
+    // failing backend can never delete good data and leave nothing in its place.
+    const { data, error } = await supabase.from('results').insert([{ athlete_id: athleteId, test_id: testId, test_date: today, raw_value: raw, converted_value: cv, unit: td ? td.unit : null, is_pr: isPR }]).select();
+    if (error || !data || !data[0]) return { error: true, message: error ? error.message : 'no response' };
+    const dupes = results.filter(r => r.athlete_id === athleteId && r.test_id === testId && r.test_date === today);
+    if (dupes.length) { try { await supabase.from('results').delete().in('id', dupes.map(r => r.id)); } catch {} }
+    setResults(prev => [...prev.filter(r => !(r.athlete_id === athleteId && r.test_id === testId && r.test_date === today)), data[0]]);
+    return { row: data[0], isPR };
   };
 
   // Add or remove an athlete from the combine roster (shared across all coaches).
@@ -1867,16 +1869,23 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
   const loggedFor = (aid) => results.find(r => r.athlete_id === aid && r.test_id === testId && r.test_date === today) || null;
   const loggedCount = roster.filter(a => loggedFor(a.id)).length;
 
+  const vkey = (aid) => `${testId}::${aid}`; // input state scoped per station (no cross-station bleed)
   const save = async (a) => {
-    const v = vals[a.id];
+    const k = vkey(a.id);
+    const v = vals[k];
     if (v == null || String(v).trim() === '' || isNaN(parseFloat(v))) return;
     setSavingId(a.id);
-    const res = await logCombineResult(a.id, testId, v);
+    let res = null;
+    try { res = await logCombineResult(a.id, testId, v); } catch (e) { res = { error: true }; }
     setSavingId(null);
-    if (res) {
-      setVals(p => { const n = { ...p }; delete n[a.id]; return n; });
+    if (res && res.row) {
+      setVals(p => { const n = { ...p }; delete n[k]; return n; });
       setFlash(p => ({ ...p, [a.id]: res.isPR ? 'pr' : 'ok' }));
       setTimeout(() => setFlash(p => { const n = { ...p }; delete n[a.id]; return n; }), 2600);
+    } else {
+      // Save FAILED — keep the number in the box, flag the row red, tell the coach.
+      setFlash(p => ({ ...p, [a.id]: 'fail' }));
+      showNotification(`NOT saved: ${a.first_name}'s ${activeTest.label}. Number kept — tap ✓ to retry.`, 'error');
     }
   };
   const doRefresh = async () => { setRefreshing(true); await refreshData(); setRefreshing(false); };
@@ -2009,24 +2018,28 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
 
       <div style={{ display: 'grid', gap: 8 }}>
         {roster.map(a => {
+          const k = vkey(a.id);
           const logged = loggedFor(a.id);
-          const shown = vals[a.id] !== undefined ? vals[a.id] : (logged ? String(logged.raw_value) : '');
+          const shown = vals[k] !== undefined ? vals[k] : (logged ? String(logged.raw_value) : '');
           const fl = flash[a.id];
           const done = !!logged;
+          const hasVal = vals[k] !== undefined && String(vals[k]).trim() !== '';
           const mph = activeTest.mph && shown && !isNaN(parseFloat(shown)) && parseFloat(shown) > 0 ? (20.45 / parseFloat(shown)).toFixed(1) : null;
+          const bg = fl === 'fail' ? 'rgba(255,80,80,0.16)' : fl === 'pr' ? 'rgba(255,207,63,0.15)' : fl === 'ok' ? 'rgba(0,255,136,0.12)' : done ? 'rgba(0,255,136,0.05)' : 'rgba(255,255,255,0.03)';
+          const bord = fl === 'fail' ? '#ff5050' : fl === 'pr' ? 'rgba(255,207,63,0.5)' : done ? 'rgba(0,255,136,0.25)' : 'rgba(255,255,255,0.1)';
           return (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: fl === 'pr' ? 'rgba(255,207,63,0.15)' : fl === 'ok' ? 'rgba(0,255,136,0.12)' : done ? 'rgba(0,255,136,0.05)' : 'rgba(255,255,255,0.03)', border: `1px solid ${fl === 'pr' ? 'rgba(255,207,63,0.5)' : done ? 'rgba(0,255,136,0.25)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 10 }}>
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: bg, border: `1px solid ${bord}`, borderRadius: 10 }}>
               {editRoster && <button onClick={() => setCombineMember(a.id, false)} style={{ background: 'none', border: 'none', color: '#ff6666', fontSize: 18, cursor: 'pointer', padding: '0 4px' }}>✕</button>}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.first_name} {a.last_name}</div>
-                {done && <div style={{ fontSize: 11, color: '#00ff88', fontWeight: 700 }}>✓ logged {logged.raw_value}{logged.is_pr ? ' · PR' : ''}</div>}
+                {fl === 'fail' ? <div style={{ fontSize: 11, color: '#ff7676', fontWeight: 800 }}>✕ did not save — tap ✓ to retry</div> : done && <div style={{ fontSize: 11, color: '#00ff88', fontWeight: 700 }}>✓ logged {logged.raw_value}{logged.is_pr ? ' · PR' : ''}</div>}
               </div>
               {mph && <div style={{ fontSize: 13, color: '#00d4ff', fontWeight: 800, minWidth: 62, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{mph} mph</div>}
               <input type="number" inputMode="decimal" value={shown} placeholder="—" onWheel={(e) => e.currentTarget.blur()}
-                onChange={(e) => setVals(p => ({ ...p, [a.id]: e.target.value }))}
+                onChange={(e) => setVals(p => ({ ...p, [k]: e.target.value }))}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); save(a); } }}
                 style={inp} />
-              <button onClick={() => save(a)} disabled={savingId === a.id || vals[a.id] === undefined || String(vals[a.id]).trim() === ''} style={{ padding: '11px 0', width: 48, background: (vals[a.id] !== undefined && String(vals[a.id]).trim() !== '') ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 8, color: (vals[a.id] !== undefined && String(vals[a.id]).trim() !== '') ? '#0a1628' : '#556', fontSize: 18, fontWeight: 800, cursor: 'pointer' }}>{savingId === a.id ? '…' : '✓'}</button>
+              <button onClick={() => save(a)} disabled={savingId === a.id || !hasVal} style={{ padding: '11px 0', width: 48, background: hasVal ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 8, color: hasVal ? '#0a1628' : '#556', fontSize: 18, fontWeight: 800, cursor: 'pointer' }}>{savingId === a.id ? '…' : '✓'}</button>
             </div>
           );
         })}
