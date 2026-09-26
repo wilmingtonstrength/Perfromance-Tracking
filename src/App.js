@@ -1860,7 +1860,7 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
   const today = new Date().toISOString().split('T')[0];
 
   const roster = athletes.filter(a => a.in_combine)
-    .sort((x, y) => `${x.last_name} ${x.first_name}`.trim().toLowerCase().localeCompare(`${y.last_name} ${y.first_name}`.trim().toLowerCase()));
+    .sort((x, y) => `${x.first_name} ${x.last_name}`.trim().toLowerCase().localeCompare(`${y.first_name} ${y.last_name}`.trim().toLowerCase()));
   const activeTest = COMBINE_TESTS.find(t => t.id === testId);
   const loggedFor = (aid) => results.find(r => r.athlete_id === aid && r.test_id === testId && r.test_date === today) || null;
   const loggedCount = roster.filter(a => loggedFor(a.id)).length;
