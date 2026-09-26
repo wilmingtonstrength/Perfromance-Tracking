@@ -1857,6 +1857,8 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
   const [refreshing, setRefreshing] = useState(false);
   const [editRoster, setEditRoster] = useState(false);
   const [nf, setNf] = useState(''); const [nl, setNl] = useState(''); const [ng, setNg] = useState('');
+  const [view, setView] = useState('enter');          // 'enter' | 'results'
+  const [rankMode, setRankMode] = useState('place');  // 'place' | 'age'
   const today = new Date().toISOString().split('T')[0];
 
   const roster = athletes.filter(a => a.in_combine)
@@ -1887,6 +1889,96 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
   const stBtn = (active) => ({ flex: '1 1 auto', padding: '14px 10px', background: active ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 10, color: active ? '#0a1628' : '#ccd', fontWeight: 800, fontSize: 15, cursor: 'pointer', letterSpacing: 0.3 });
   const inp = { width: 92, padding: '12px 10px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 18, fontWeight: 700, textAlign: 'center', fontVariantNumeric: 'tabular-nums' };
 
+  // ---------- Results / rankings (computed only when the Results view is open) ----------
+  const renderResults = () => {
+    const GROUP_ORDER = ['13U Boys', '13U Girls', '14+ Boys', '14+ Girls'];
+    const ageOf = (a) => calculateAge(a.birthday);
+    const groupOf = (a) => { const ag = ageOf(a); if (ag == null) return null; return (ag <= 13 ? '13U' : '14+') + (genderOf(a) === 'F' ? ' Girls' : ' Boys'); };
+    const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+    // The combine "day" = latest date any roster kid logged one of the four tests.
+    const rid = new Set(roster.map(a => a.id));
+    let combineDate = null;
+    for (const r of results) if (rid.has(r.athlete_id) && COMBINE_TESTS.some(t => t.id === r.test_id) && (!combineDate || r.test_date > combineDate)) combineDate = r.test_date;
+    if (!combineDate) return <div style={{ textAlign: 'center', padding: 48, color: '#666' }}>No combine results yet. They show up here as coaches enter times.</div>;
+    const combineRow = (aid, tid) => results.find(x => x.athlete_id === aid && x.test_id === tid && x.test_date === combineDate) || null;
+
+    // Best value per athlete per test (peer pool for the age-percentile mode).
+    const bestMap = {};
+    COMBINE_TESTS.forEach(t => { const td = getTestById(t.id); const dir = td ? td.direction : 'higher'; const m = {}; for (const r of results) { if (r.test_id !== t.id) continue; const v = parseFloat(r.converted_value); if (isNaN(v)) continue; m[r.athlete_id] = (r.athlete_id in m) ? (dir === 'higher' ? Math.max(m[r.athlete_id], v) : Math.min(m[r.athlete_id], v)) : v; } bestMap[t.id] = m; });
+    const pctlFor = (a, tid) => { const td = getTestById(tid); const row = combineRow(a.id, tid); if (!td || !row) return null; const val = parseFloat(row.converted_value); const g = genderOf(a); const ag = ageOf(a); const pool = []; for (const p of athletes) { if ((p.type || 'athlete') !== 'athlete' || genderOf(p) !== g) continue; if (ag != null) { const pa = ageOf(p); if (pa == null || Math.abs(pa - ag) > 1) continue; } const b = bestMap[tid][p.id]; if (b != null) pool.push(b); } return pctlRank(val, pool, td.direction); };
+    const placeOf = (val, vals, dir) => { let better = 0; for (const v of vals) if (dir === 'higher' ? v > val : v < val) better++; return better + 1; };
+
+    return (
+      <div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[['place', 'Placement'], ['age', 'Best for Age']].map(([m, l]) => (
+            <button key={m} onClick={() => setRankMode(m)} style={{ flex: 1, padding: '11px 8px', background: rankMode === m ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: rankMode === m ? '#0a1628' : '#ccd', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{l}</button>
+          ))}
+        </div>
+        <p style={{ margin: '0 0 18px', color: '#8ea3bc', fontSize: 12.5, lineHeight: 1.5 }}>{rankMode === 'place' ? 'Total placement across all four tests, lowest wins. Only athletes who did all four are eligible; ties broken by most first-place finishes.' : 'Average percentile vs same-age (±1 yr), same-sex athletes in your gym — an age-fair pound-for-pound score.'}</p>
+        {GROUP_ORDER.map(g => {
+          const members = roster.filter(a => groupOf(a) === g);
+          if (members.length === 0) return null;
+          let rows = members.map(a => {
+            const cells = COMBINE_TESTS.map(t => { const row = combineRow(a.id, t.id); const td = getTestById(t.id); return { t, td, val: row ? parseFloat(row.converted_value) : null, pr: row ? !!row.is_pr : false, dir: td ? td.direction : 'higher' }; });
+            return { a, cells, complete: cells.every(c => c.val != null) };
+          });
+          COMBINE_TESTS.forEach(t => { const vals = rows.map(r => r.cells.find(c => c.t.id === t.id).val).filter(v => v != null); rows.forEach(r => { const c = r.cells.find(x => x.t.id === t.id); c.place = c.val != null ? placeOf(c.val, vals, c.dir) : null; c.pct = rankMode === 'age' ? pctlFor(r.a, t.id) : null; }); });
+          rows.forEach(r => { r.total = r.complete ? r.cells.reduce((s, c) => s + c.place, 0) : null; r.firsts = r.cells.filter(c => c.place === 1).length; const ps = r.cells.map(c => c.pct).filter(v => v != null); r.avgPct = ps.length ? Math.round(ps.reduce((s, v) => s + v, 0) / ps.length) : null; });
+          const eligible = rows.filter(r => r.complete);
+          const incomplete = rows.filter(r => !r.complete).sort((x, y) => x.a.first_name.localeCompare(y.a.first_name));
+          if (rankMode === 'place') eligible.sort((x, y) => x.total - y.total || y.firsts - x.firsts);
+          else eligible.sort((x, y) => (y.avgPct ?? -1) - (x.avgPct ?? -1));
+          const ranked = [...eligible, ...incomplete];
+          return (
+            <div key={g} style={{ marginBottom: 26 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+                <h2 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 18, margin: 0 }}>{g}</h2>
+                <span style={{ color: '#5c6c82', fontSize: 12 }}>{members.length} athlete{members.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {ranked.map((r, i) => {
+                  const rank = r.complete ? i + 1 : null;
+                  const win = rank === 1;
+                  return (
+                    <div key={r.a.id} style={{ padding: '12px 14px', borderRadius: 12, background: win ? 'rgba(255,207,63,0.12)' : 'rgba(255,255,255,0.03)', border: `1px solid ${win ? 'rgba(255,207,63,0.5)' : 'rgba(255,255,255,0.1)'}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <div style={{ width: 30, textAlign: 'center', fontFamily: "'Archivo Black', sans-serif", fontSize: 18, color: win ? '#ffcf3f' : rank ? '#ccd' : '#556' }}>{win ? '🏆' : rank ? rank : '—'}</div>
+                        <div style={{ flex: 1, fontWeight: 800, fontSize: 16 }}>{r.a.first_name} {r.a.last_name}</div>
+                        {r.complete ? (
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 10, color: '#8ea3bc', textTransform: 'uppercase', letterSpacing: 1 }}>{rankMode === 'place' ? 'Total' : 'Avg %ile'}</div>
+                            <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 20, color: win ? '#ffcf3f' : '#fff' }}>{rankMode === 'place' ? r.total : (r.avgPct != null ? r.avgPct : '—')}</div>
+                          </div>
+                        ) : <span style={{ fontSize: 11, color: '#FFA500', fontWeight: 700 }}>incomplete</span>}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                        {r.cells.map(c => {
+                          const mph = c.t.mph && c.val ? (20.45 / c.val).toFixed(1) : null;
+                          const sub = rankMode === 'place' ? (c.place ? ordinal(c.place) : '—') : (c.pct != null ? ordinal(c.pct) : '—');
+                          return (
+                            <div key={c.t.id} style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.22)', borderRadius: 8, border: c.pr ? '1px solid rgba(255,207,63,0.45)' : '1px solid transparent' }}>
+                              <div style={{ fontSize: 10, color: '#8ea3bc', textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', justifyContent: 'space-between', gap: 6 }}><span>{c.t.label}</span><span style={{ color: c.place === 1 ? '#ffcf3f' : '#5c6c82', fontWeight: 700 }}>{sub}</span></div>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 3 }}>
+                                <span style={{ fontSize: 16, fontWeight: 800, color: c.val != null ? '#fff' : '#556', fontVariantNumeric: 'tabular-nums' }}>{c.val != null ? (c.td ? formatResultWithUnit(c.td, c.val) : c.val) : '—'}</span>
+                                {mph && <span style={{ fontSize: 11, color: '#00d4ff', fontWeight: 700 }}>{mph}</span>}
+                                {c.pr && <span style={{ fontSize: 10, color: '#ffcf3f', fontWeight: 800 }}>PR</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
@@ -1896,10 +1988,17 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={doRefresh} disabled={refreshing} style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 8, color: '#00d4ff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{refreshing ? 'Refreshing…' : '↻ Refresh'}</button>
-          <button onClick={() => setEditRoster(e => !e)} style={{ padding: '10px 16px', background: editRoster ? 'rgba(255,165,0,0.18)' : 'rgba(255,255,255,0.06)', border: `1px solid ${editRoster ? '#FFA500' : 'rgba(255,255,255,0.18)'}`, borderRadius: 8, color: editRoster ? '#FFA500' : '#aaa', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{editRoster ? 'Done' : 'Edit roster'}</button>
+          {view === 'enter' && <button onClick={() => setEditRoster(e => !e)} style={{ padding: '10px 16px', background: editRoster ? 'rgba(255,165,0,0.18)' : 'rgba(255,255,255,0.06)', border: `1px solid ${editRoster ? '#FFA500' : 'rgba(255,255,255,0.18)'}`, borderRadius: 8, color: editRoster ? '#FFA500' : '#aaa', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{editRoster ? 'Done' : 'Edit roster'}</button>}
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {[['enter', 'Enter'], ['results', '🏆 Results']].map(([v, l]) => (
+          <button key={v} onClick={() => setView(v)} style={{ flex: 1, padding: '12px', background: view === v ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.05)', border: `1px solid ${view === v ? '#00ff88' : 'rgba(255,255,255,0.12)'}`, borderRadius: 10, color: view === v ? '#00ff88' : '#aaa', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>{l}</button>
+        ))}
+      </div>
+
+      {view === 'enter' && (<>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         {COMBINE_TESTS.map(t => (<button key={t.id} onClick={() => setTestId(t.id)} style={stBtn(t.id === testId)}>{t.label}</button>))}
       </div>
@@ -1949,6 +2048,8 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
           </div>
         </div>
       )}
+      </>)}
+      {view === 'results' && renderResults()}
     </div>
   );
 }
