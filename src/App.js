@@ -751,6 +751,38 @@ export default function App() {
     return newResults;
   };
 
+  // Combine entry: one fast save per athlete/test. Overwrites any existing entry
+  // for that athlete+test TODAY (so fixing a typo doesn't leave a duplicate row),
+  // computes the PR flag against the athlete's history before today, and logs it
+  // as a normal result. Returns { row, isPR } so the Combine tab can flash feedback.
+  const logCombineResult = async (athleteId, testId, rawValue) => {
+    const td = getTestById(testId);
+    const raw = parseFloat(rawValue);
+    if (isNaN(raw)) return null;
+    const cv = td && td.convert_formula ? applyConversion(td, raw) : raw;
+    const today = new Date().toISOString().split('T')[0];
+    const dupes = results.filter(r => r.athlete_id === athleteId && r.test_id === testId && r.test_date === today);
+    if (dupes.length) await supabase.from('results').delete().in('id', dupes.map(r => r.id));
+    const prior = results.filter(r => r.athlete_id === athleteId && r.test_id === testId && r.test_date !== today);
+    let isPR = prior.length === 0;
+    if (!isPR && td) {
+      const best = td.direction === 'higher' ? Math.max(...prior.map(r => parseFloat(r.converted_value))) : Math.min(...prior.map(r => parseFloat(r.converted_value)));
+      isPR = td.direction === 'higher' ? cv > best : cv < best;
+    }
+    const { data } = await supabase.from('results').insert([{ athlete_id: athleteId, test_id: testId, test_date: today, raw_value: raw, converted_value: cv, unit: td ? td.unit : null, is_pr: isPR }]).select();
+    if (data && data[0]) {
+      setResults(prev => [...prev.filter(r => !(r.athlete_id === athleteId && r.test_id === testId && r.test_date === today)), data[0]]);
+      return { row: data[0], isPR };
+    }
+    return null;
+  };
+
+  // Add or remove an athlete from the combine roster (shared across all coaches).
+  const setCombineMember = async (athleteId, inCombine) => {
+    const { error } = await supabase.from('athletes').update({ in_combine: inCombine }).eq('id', athleteId);
+    if (!error) setAthletes(prev => prev.map(a => a.id === athleteId ? { ...a, in_combine: inCombine } : a));
+  };
+
   const getPR = (athleteId, testId) => {
     const td = getTestById(testId);
     if (!td) return null;
@@ -779,6 +811,7 @@ export default function App() {
 
   const navItems = [
     { id: 'entry', label: 'Test Entry' },
+    { id: 'combine', label: '🏁 Combine' },
     { id: 'athletes', label: 'Athletes' },
     { id: 'profiles', label: '📊 Profiles' },
     { id: 'recentprs', label: '🔥 Recent PRs' },
@@ -826,6 +859,7 @@ export default function App() {
         {page === 'mphclub' && <MphClubPage athletes={athletes} results={results} />}
         {page === 'assessments' && <AssessmentsPage athletes={athletes} getAssessment={getAssessment} saveAssessment={saveAssessment} addAthlete={addAthlete} logResults={logResults} getTestById={getTestById} showNotification={showNotification} />}
         {page === 'adultprogram' && <AdultProgramPage athletes={athletes} results={results} getTestById={getTestById} adultPrograms={adultPrograms} autoTvMode={kiosk && initialTv === 'adult'} kiosk={kiosk} />}
+        {page === 'combine' && <CombinePage athletes={athletes} results={results} getTestById={getTestById} logCombineResult={logCombineResult} setCombineMember={setCombineMember} addAthlete={addAthlete} showNotification={showNotification} refreshData={loadData} />}
       </main>
       <style>{`* { box-sizing: border-box; } input, select, button { font-family: inherit; } input:focus, select:focus { outline: 2px solid #00d4ff; outline-offset: 2px; } input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type=number] { -moz-appearance: textfield; appearance: textfield; }`}</style>
     </div>
@@ -1802,6 +1836,119 @@ function AdultAssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
         <button onClick={handleSave} disabled={saving || !dirty} style={{ padding: '12px 32px', background: (saving || !dirty) ? '#555' : 'linear-gradient(135deg, #FFA500 0%, #cc8400 100%)', border: 'none', borderRadius: 8, color: (saving || !dirty) ? '#aaa' : '#0a1628', fontSize: 15, fontWeight: 700, cursor: (saving || !dirty) ? 'not-allowed' : 'pointer' }}>{saving ? 'Saving...' : (dirty ? 'Save Assessment' : 'Saved')}</button>
         {dirty && <span style={{ fontSize: 12, color: '#FFA500' }}>Unsaved changes</span>}
       </div>
+    </div>
+  );
+}
+
+/* ===================== COMBINE (shared multi-coach fast entry) ===================== */
+// Four stations in run order. The 20-10 fly logs its raw time (test 20_10_fly)
+// but shows a live max-velocity readout (20.45 / time) so coaches see the mph.
+const COMBINE_TESTS = [
+  { id: '5_10_fly', label: '5-10 Fly', unit: 'sec' },
+  { id: '5_0_5', label: '5-0-5', unit: 'sec' },
+  { id: 'vertical_jump', label: 'Vertical Jump', unit: 'in' },
+  { id: '20_10_fly', label: '20-10 Fly', unit: 'sec', mph: true },
+];
+function CombinePage({ athletes, results, getTestById, logCombineResult, setCombineMember, addAthlete, showNotification, refreshData }) {
+  const [testId, setTestId] = useState('5_10_fly');
+  const [vals, setVals] = useState({});          // athleteId -> unsaved input text
+  const [savingId, setSavingId] = useState(null);
+  const [flash, setFlash] = useState({});        // athleteId -> 'ok' | 'pr'
+  const [refreshing, setRefreshing] = useState(false);
+  const [editRoster, setEditRoster] = useState(false);
+  const [nf, setNf] = useState(''); const [nl, setNl] = useState(''); const [ng, setNg] = useState('');
+  const today = new Date().toISOString().split('T')[0];
+
+  const roster = athletes.filter(a => a.in_combine)
+    .sort((x, y) => `${x.last_name} ${x.first_name}`.trim().toLowerCase().localeCompare(`${y.last_name} ${y.first_name}`.trim().toLowerCase()));
+  const activeTest = COMBINE_TESTS.find(t => t.id === testId);
+  const loggedFor = (aid) => results.find(r => r.athlete_id === aid && r.test_id === testId && r.test_date === today) || null;
+  const loggedCount = roster.filter(a => loggedFor(a.id)).length;
+
+  const save = async (a) => {
+    const v = vals[a.id];
+    if (v == null || String(v).trim() === '' || isNaN(parseFloat(v))) return;
+    setSavingId(a.id);
+    const res = await logCombineResult(a.id, testId, v);
+    setSavingId(null);
+    if (res) {
+      setVals(p => { const n = { ...p }; delete n[a.id]; return n; });
+      setFlash(p => ({ ...p, [a.id]: res.isPR ? 'pr' : 'ok' }));
+      setTimeout(() => setFlash(p => { const n = { ...p }; delete n[a.id]; return n; }), 2600);
+    }
+  };
+  const doRefresh = async () => { setRefreshing(true); await refreshData(); setRefreshing(false); };
+  const addNew = async () => {
+    if (!nf.trim() || !nl.trim()) { showNotification('First and last name required', 'error'); return; }
+    const created = await addAthlete({ firstName: nf.trim(), lastName: nl.trim(), gender: ng, type: 'athlete' });
+    if (created) { await setCombineMember(created.id, true); setNf(''); setNl(''); setNg(''); }
+  };
+
+  const stBtn = (active) => ({ flex: '1 1 auto', padding: '14px 10px', background: active ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 10, color: active ? '#0a1628' : '#ccd', fontWeight: 800, fontSize: 15, cursor: 'pointer', letterSpacing: 0.3 });
+  const inp = { width: 92, padding: '12px 10px', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#fff', fontSize: 18, fontWeight: 700, textAlign: 'center', fontVariantNumeric: 'tabular-nums' };
+
+  return (
+    <div style={{ maxWidth: 640, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 30, margin: 0 }}>🏁 Combine</h1>
+          <p style={{ margin: '4px 0 0', color: '#8ea3bc', fontSize: 13 }}>{roster.length} athletes · everyone enters from their own phone</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={doRefresh} disabled={refreshing} style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 8, color: '#00d4ff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{refreshing ? 'Refreshing…' : '↻ Refresh'}</button>
+          <button onClick={() => setEditRoster(e => !e)} style={{ padding: '10px 16px', background: editRoster ? 'rgba(255,165,0,0.18)' : 'rgba(255,255,255,0.06)', border: `1px solid ${editRoster ? '#FFA500' : 'rgba(255,255,255,0.18)'}`, borderRadius: 8, color: editRoster ? '#FFA500' : '#aaa', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{editRoster ? 'Done' : 'Edit roster'}</button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        {COMBINE_TESTS.map(t => (<button key={t.id} onClick={() => setTestId(t.id)} style={stBtn(t.id === testId)}>{t.label}</button>))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '0 4px' }}>
+        <span style={{ color: '#8ea3bc', fontSize: 13 }}>Station: <b style={{ color: '#fff' }}>{activeTest.label}</b> <span style={{ color: '#5c6c82' }}>({activeTest.unit}{activeTest.mph ? ' · shows mph' : ''})</span></span>
+        <span style={{ color: loggedCount === roster.length && roster.length > 0 ? '#00ff88' : '#8ea3bc', fontSize: 13, fontWeight: 700 }}>{loggedCount} / {roster.length} logged</span>
+      </div>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {roster.map(a => {
+          const logged = loggedFor(a.id);
+          const shown = vals[a.id] !== undefined ? vals[a.id] : (logged ? String(logged.raw_value) : '');
+          const fl = flash[a.id];
+          const done = !!logged;
+          const mph = activeTest.mph && shown && !isNaN(parseFloat(shown)) && parseFloat(shown) > 0 ? (20.45 / parseFloat(shown)).toFixed(1) : null;
+          return (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: fl === 'pr' ? 'rgba(255,207,63,0.15)' : fl === 'ok' ? 'rgba(0,255,136,0.12)' : done ? 'rgba(0,255,136,0.05)' : 'rgba(255,255,255,0.03)', border: `1px solid ${fl === 'pr' ? 'rgba(255,207,63,0.5)' : done ? 'rgba(0,255,136,0.25)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 10 }}>
+              {editRoster && <button onClick={() => setCombineMember(a.id, false)} style={{ background: 'none', border: 'none', color: '#ff6666', fontSize: 18, cursor: 'pointer', padding: '0 4px' }}>✕</button>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.first_name} {a.last_name}</div>
+                {done && <div style={{ fontSize: 11, color: '#00ff88', fontWeight: 700 }}>✓ logged {logged.raw_value}{logged.is_pr ? ' · PR' : ''}</div>}
+              </div>
+              {mph && <div style={{ fontSize: 13, color: '#00d4ff', fontWeight: 800, minWidth: 62, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{mph} mph</div>}
+              <input type="number" inputMode="decimal" value={shown} placeholder="—" onWheel={(e) => e.currentTarget.blur()}
+                onChange={(e) => setVals(p => ({ ...p, [a.id]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); save(a); } }}
+                style={inp} />
+              <button onClick={() => save(a)} disabled={savingId === a.id || vals[a.id] === undefined || String(vals[a.id]).trim() === ''} style={{ padding: '11px 0', width: 48, background: (vals[a.id] !== undefined && String(vals[a.id]).trim() !== '') ? 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)' : 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 8, color: (vals[a.id] !== undefined && String(vals[a.id]).trim() !== '') ? '#0a1628' : '#556', fontSize: 18, fontWeight: 800, cursor: 'pointer' }}>{savingId === a.id ? '…' : '✓'}</button>
+            </div>
+          );
+        })}
+        {roster.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>No athletes in the combine yet. Tap “Edit roster” to add some.</div>}
+      </div>
+
+      {editRoster && (
+        <div style={{ marginTop: 18, padding: 16, background: 'rgba(255,165,0,0.05)', border: '1px solid rgba(255,165,0,0.2)', borderRadius: 12 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 13, color: '#FFA500', textTransform: 'uppercase', letterSpacing: 1.5 }}>Add to roster</h3>
+          <div style={{ marginBottom: 14 }}>
+            <AthleteSearchPicker athletes={athletes} value={null} onChange={(id) => id && setCombineMember(id, true)} excludeIds={roster.map(a => a.id)} placeholder="Search an existing athlete to add…" filterType="athlete" />
+          </div>
+          <div style={{ fontSize: 12, color: '#8ea3bc', marginBottom: 8, fontWeight: 600 }}>…or create a brand-new athlete</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={nf} onChange={(e) => setNf(e.target.value)} placeholder="First" style={{ ...inp, width: 120, textAlign: 'left', fontSize: 15, fontWeight: 500 }} />
+            <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder="Last" style={{ ...inp, width: 120, textAlign: 'left', fontSize: 15, fontWeight: 500 }} />
+            {['M', 'F'].map(g => (<button key={g} onClick={() => setNg(ng === g ? '' : g)} style={{ padding: '10px 16px', background: ng === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: ng === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: ng === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontWeight: 700 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}
+            <button onClick={addNew} style={{ padding: '11px 20px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer' }}>Add</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
