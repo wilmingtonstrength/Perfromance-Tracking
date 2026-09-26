@@ -1845,14 +1845,15 @@ function AdultAssessmentEditor({ athleteId, getAssessment, saveAssessment }) {
 /* ===================== COMBINE (shared multi-coach fast entry) ===================== */
 // Four stations in run order. The 20-10 fly logs its raw time (test 20_10_fly)
 // but shows a live max-velocity readout (20.45 / time) so coaches see the mph.
+// 5-10 fly was dropped from the 9/26 combine (its data was lost to a save bug),
+// so this combine scores on three tests. Re-add the 5-10 fly line to bring it back.
 const COMBINE_TESTS = [
-  { id: '5_10_fly', label: '5-10 Fly', unit: 'sec' },
   { id: '5_0_5', label: '5-0-5', unit: 'sec' },
   { id: 'vertical_jump', label: 'Vertical Jump', unit: 'in' },
   { id: '20_10_fly', label: '20-10 Fly', unit: 'sec', mph: true },
 ];
 function CombinePage({ athletes, results, getTestById, logCombineResult, setCombineMember, addAthlete, showNotification, refreshData }) {
-  const [testId, setTestId] = useState('5_10_fly');
+  const [testId, setTestId] = useState('5_0_5');
   const [vals, setVals] = useState({});          // athleteId -> unsaved input text
   const [savingId, setSavingId] = useState(null);
   const [flash, setFlash] = useState({});        // athleteId -> 'ok' | 'pr'
@@ -1924,7 +1925,7 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
             <button key={m} onClick={() => setRankMode(m)} style={{ flex: 1, padding: '11px 8px', background: rankMode === m ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 8, color: rankMode === m ? '#0a1628' : '#ccd', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{l}</button>
           ))}
         </div>
-        <p style={{ margin: '0 0 18px', color: '#8ea3bc', fontSize: 12.5, lineHeight: 1.5 }}>{rankMode === 'place' ? 'Total placement across all four tests, lowest wins. Only athletes who did all four are eligible; ties broken by most first-place finishes.' : 'Average percentile vs same-age (±1 yr), same-sex athletes in your gym — an age-fair pound-for-pound score.'}</p>
+        <p style={{ margin: '0 0 18px', color: '#8ea3bc', fontSize: 12.5, lineHeight: 1.5 }}>{rankMode === 'place' ? 'Total placement across all three tests, lowest wins. Only athletes who did all three are eligible; ties broken by most first-place finishes.' : 'Average percentile vs same-age (±1 yr), same-sex athletes in your gym — an age-fair pound-for-pound score.'}</p>
         {GROUP_ORDER.map(g => {
           const members = roster.filter(a => groupOf(a) === g);
           if (members.length === 0) return null;
