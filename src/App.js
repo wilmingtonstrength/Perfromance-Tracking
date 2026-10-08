@@ -3510,9 +3510,12 @@ function AdultProgramPage({ athletes, results, getTestById, adultPrograms, autoT
         return { ...r, athlete: ath };
       })
       .filter(Boolean);
+    // Pick the best result per the test's direction: highest for higher-is-better
+    // (vertical, broad jump), lowest for lower-is-better (5-0-5, assault bike time).
+    const dir = challengeTest ? challengeTest.direction : 'higher';
     const byGender = (g) => adultResults
       .filter(r => (r.athlete.gender || '').toLowerCase().startsWith(g))
-      .sort((a, b) => parseFloat(b.converted_value) - parseFloat(a.converted_value))[0] || null;
+      .sort((a, b) => dir === 'higher' ? parseFloat(b.converted_value) - parseFloat(a.converted_value) : parseFloat(a.converted_value) - parseFloat(b.converted_value))[0] || null;
     topMale = byGender('m');
     topFemale = byGender('f');
   }
