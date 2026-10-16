@@ -1595,7 +1595,7 @@ function NewAthleteAssessment({ addAthlete, saveAssessment, logResults, getTestB
           <div><label style={labelStyle}>Last Name *</label><input value={lastName} onChange={(e) => setLastName(e.target.value)} style={iStyle} /></div>
           <div><label style={labelStyle}>Date of Birth</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={iStyle} /></div>
           <div><label style={labelStyle}>Gender</label>
-            <div style={{ display: 'flex', gap: 8 }}>{['M', 'F'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}</div>
+            <div style={{ display: 'flex', gap: 8 }}>{['Male', 'Female'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g}</button>))}</div>
           </div>
         </div>
       </div>
@@ -1767,7 +1767,7 @@ function NewAdultAssessment({ addAthlete, saveAssessment, logResults, getTestByI
           <div><label style={labelStyle}>Last Name *</label><input value={lastName} onChange={(e) => setLastName(e.target.value)} style={iStyle} /></div>
           <div><label style={labelStyle}>Date of Birth</label><input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={iStyle} /></div>
           <div><label style={labelStyle}>Gender</label>
-            <div style={{ display: 'flex', gap: 8 }}>{['M', 'F'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(255,165,0,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #FFA500' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#FFA500' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}</div>
+            <div style={{ display: 'flex', gap: 8 }}>{['Male', 'Female'].map(g => (<button key={g} onClick={() => setGender(gender === g ? '' : g)} style={{ flex: 1, padding: '11px 0', background: gender === g ? 'rgba(255,165,0,0.2)' : 'rgba(255,255,255,0.05)', border: gender === g ? '1px solid #FFA500' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: gender === g ? '#FFA500' : '#aaa', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>{g}</button>))}</div>
           </div>
         </div>
       </div>
@@ -2057,7 +2057,7 @@ function CombinePage({ athletes, results, getTestById, logCombineResult, setComb
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <input value={nf} onChange={(e) => setNf(e.target.value)} placeholder="First" style={{ ...inp, width: 120, textAlign: 'left', fontSize: 15, fontWeight: 500 }} />
             <input value={nl} onChange={(e) => setNl(e.target.value)} placeholder="Last" style={{ ...inp, width: 120, textAlign: 'left', fontSize: 15, fontWeight: 500 }} />
-            {['M', 'F'].map(g => (<button key={g} onClick={() => setNg(ng === g ? '' : g)} style={{ padding: '10px 16px', background: ng === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: ng === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: ng === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontWeight: 700 }}>{g === 'M' ? 'Male' : 'Female'}</button>))}
+            {['Male', 'Female'].map(g => (<button key={g} onClick={() => setNg(ng === g ? '' : g)} style={{ padding: '10px 16px', background: ng === g ? 'rgba(0,212,255,0.2)' : 'rgba(255,255,255,0.05)', border: ng === g ? '1px solid #00d4ff' : '1px solid rgba(255,255,255,0.15)', borderRadius: 8, color: ng === g ? '#00d4ff' : '#aaa', cursor: 'pointer', fontWeight: 700 }}>{g}</button>))}
             <button onClick={addNew} style={{ padding: '11px 20px', background: 'linear-gradient(135deg, #00ff88 0%, #00cc6a 100%)', border: 'none', borderRadius: 8, color: '#0a1628', fontWeight: 700, cursor: 'pointer' }}>Add</button>
           </div>
         </div>
@@ -2851,7 +2851,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById, autoTvMode,
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
           if (EXCLUDED.includes(fullName)) return;
           const g = (a.gender || '').toLowerCase();
-          const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
+          const isMatch = genderFilter === 'boys' ? !g.startsWith('f') : g.startsWith('f');
           if (!isMatch) return;
           const best = getRollupBest(a.id, rollupIds);
           if (best === null) return;
@@ -2869,7 +2869,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById, autoTvMode,
           const fullName = `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}`.toLowerCase();
           if (EXCLUDED.includes(fullName)) return;
           const g = (a.gender || '').toLowerCase();
-          const isMatch = genderFilter === 'boys' ? g !== 'female' : g === 'female';
+          const isMatch = genderFilter === 'boys' ? !g.startsWith('f') : g.startsWith('f');
           if (!isMatch) return;
           const val = parseFloat(r.converted_value || r.raw_value); if (isNaN(val)) return;
           const age = getAgeAtTest(a.birthday, r.test_date);
@@ -2894,7 +2894,7 @@ function RecordBoardPage({ athletes, results, testDefs, getTestById, autoTvMode,
     const rollupIds = ROLLUP_MAP[test.id];
     adultAthletes.forEach(a => {
       const g = (a.gender || '').toLowerCase();
-      const matches = genderFilter === 'men' ? g !== 'female' : g === 'female';
+      const matches = genderFilter === 'men' ? !g.startsWith('f') : g.startsWith('f');
       if (!matches) return;
       let best = null, bestEst = false;
       const rows = rollupIds
